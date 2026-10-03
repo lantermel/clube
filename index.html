@@ -1495,6 +1495,30 @@ window.storage = {
       if(error) return null;
       return { keys: (data||[]).map(function(r){ return r.key; }), prefix, shared: true };
     }catch(e){ return null; }
+  },
+  /* NOVO: lê chave+valor de TODAS as chaves de um prefixo numa única consulta
+     (pagina de 1000 em 1000 por segurança). É o que elimina o "N+1": antes a
+     carga fazia 1 list + N gets; agora faz 1 consulta (ou poucas, se houver
+     milhares de blocos). O resto do sistema não muda. */
+  getAll: async function(prefix, shared){
+    if(!REMOTE_CONFIGURADO || !_sb) return null;
+    try{
+      const pageSize = 1000;
+      let from = 0, rows = [];
+      while(true){
+        const { data, error } = await _sb
+          .from('kv_store').select('key,value')
+          .like('key', (prefix||'') + '%')
+          .order('key')
+          .range(from, from + pageSize - 1);
+        if(error) return { rows, erro: error.message };
+        const batch = data || [];
+        rows = rows.concat(batch);
+        if(batch.length < pageSize) break;   // última página
+        from += pageSize;
+      }
+      return { rows, prefix, shared: true };
+    }catch(e){ return { rows: [], erro: String(e && e.message || e) }; }
   }
 };
 
@@ -1570,22 +1594,28 @@ async function lerChaveComRetry(chave){
 async function loadChunkedByMonth(prefix){
   let todos = [];
   try{
-    const listagem = await window.storage.list(prefix, true);
-    const chaves = (listagem && listagem.keys) ? listagem.keys : [];
-    CARGA_TOTAL += chaves.length;
+    // ===== CARGA OTIMIZADA =====
+    // Antes: 1 list + 1 get por chave (dezenas/centenas de requisições).
+    // Agora: UMA consulta traz chave+valor de todos os blocos de uma vez.
+    const resp = await window.storage.getAll(prefix, true);
+    const rows = (resp && resp.rows) ? resp.rows : [];
+    if(resp && resp.erro){ CARGA_FALHAS.push(prefix + '(consulta)'); }
+    CARGA_TOTAL += rows.length;
+    CARGA_FEITAS += rows.length;
     cargaProgresso(CARGA_FEITAS, CARGA_TOTAL, prefix.replace(/[:_]/g,' ').trim());
-    // O Apps Script não suporta muitas chamadas simultâneas: lotes pequenos e com repetição.
-    // Paralelismo alto fazia dias inteiros sumirem sem aviso.
-    // Cada leitura leva ~1,5s no Apps Script. Em lotes de 6, vinte chaves
-    // custavam mais de 30 segundos. Lotes maiores derrubam isso para poucos.
-    const partes = await emLotes(chaves, 6, async (chave)=>{
-      const r = await lerChaveComRetry(chave);
-      CARGA_FEITAS++;
-      cargaProgresso(CARGA_FEITAS, CARGA_TOTAL, prefix.replace(/[:_]/g,' ').trim());
-      if(r.falhou){ CARGA_FALHAS.push(chave); return []; }
-      return r.itens;
-    });
-    partes.forEach(p=>{ todos = todos.concat(p); });
+
+    for(const row of rows){
+      const chave = row.key;
+      const val = row.value;
+      if(val === null || val === undefined){ CHAVES_VAZIAS.add(chave); continue; }
+      try{
+        const p = JSON.parse(val);
+        const itens = Array.isArray(p) ? p : [];
+        if(itens.length === 0) CHAVES_VAZIAS.add(chave);
+        CONTEUDO_GRAVADO[chave] = val;   // mantém o cache que evita regravar blocos iguais
+        todos = todos.concat(itens);
+      }catch(e){ /* conteúdo inválido: ignora este bloco */ }
+    }
     // chaves diárias e mensais podem coexistir durante a migração: remove repetidos
     const vistos = new Set();
     todos = todos.filter(r=>{
@@ -1593,26 +1623,23 @@ async function loadChunkedByMonth(prefix){
       if(vistos.has(k)) return false;
       vistos.add(k); return true;
     });
-  }catch(e){ CARGA_FALHAS.push(prefix + '(listagem)'); }
+  }catch(e){ CARGA_FALHAS.push(prefix + '(consulta)'); }
   return todos;
 }
 
 /* Grava um valor de qualquer tamanho, fatiando se passar do limite da célula.
    A primeira parte guarda quantas são, para a leitura remontar. */
 async function gravarGrande(chave, texto){
-  if(texto.length <= LIMITE_BLOCO) return gravarVerificado(chave, texto);
-  // A primeira parte vai embrulhada em JSON e cada aspa do conteúdo vira \", o que
-  // aumenta o tamanho. Pedaços menores dão margem confortável para esse escape.
-  // Folga para o escape de aspas da cabeça: 12.000 vira no máximo ~14.000.
-  const PASSO = Math.floor(LIMITE_BLOCO * 0.8);
-  const pedacos = [];
-  for(let i=0; i<texto.length; i+=PASSO) pedacos.push(texto.slice(i, i+PASSO));
-  const cabeca = JSON.stringify({_partes: pedacos.length, _dados: pedacos[0]});
-  if(!await gravarVerificado(chave, cabeca)) return false;
-  for(let i=1; i<pedacos.length; i++){
-    if(!await gravarVerificado(chave+'#p'+i, pedacos[i])) return false;
-  }
-  return true;
+  // Item 2: sem fatiar por tamanho — o Postgres aceita o valor inteiro numa célula.
+  const ok = await gravarVerificado(chave, texto);
+  if(!ok) return false;
+  // Limpa partes '#p' de gravações antigas (formato anterior), se existirem.
+  try{
+    const l = await window.storage.list(chave + '#p', true);
+    const partes = (l && l.keys) ? l.keys : [];
+    await emLotes(partes, 6, k => window.storage.delete(k, true));
+  }catch(e){}
+  return ok;
 }
 
 /* Lê um valor que pode ter sido gravado em partes */
@@ -1951,111 +1978,71 @@ function diagnosticarDuplicidade(arr, camposFn){
    Agora o bloco remoto é lido antes, e só os dias efetivamente alterados são
    substituídos pelo estado local. O resto é preservado. */
 async function saveChunkedByMonth(prefix, registros, diasAfetados, removidos){
-  const dias = (Array.isArray(diasAfetados) ? diasAfetados.filter(Boolean) : []);
-  const meses = dias.length
-    ? [...new Set(dias.map(chaveMes))]
-    : [...new Set(registros.map(r=>chaveMes(r.data)))];
+  // ===== GRAVAÇÃO EM CHAVE ÚNICA (item 2) =====
+  // Antes: um bloco por mês, cada um podendo se subdividir por tamanho —
+  // dezenas de chaves e dezenas de leituras/gravações a cada salvamento.
+  // Agora: o conjunto inteiro vai numa ÚNICA chave (prefix+'all'). O Postgres
+  // não tem o limite de 50 mil caracteres por célula que obrigava o fatiamento.
+  const CHAVE = prefix + 'all';
+  const incremental = Array.isArray(diasAfetados) && diasAfetados.filter(Boolean).length > 0;
 
-  for(const mes of meses){
-    const locais = registros.filter(r=>chaveMes(r.data)===mes);
-
-    // Numa gravação incremental já sabemos o conteúdo do mês: ele está em memória.
-    // Reler tudo só é necessário quando pode haver dado que a memória não tem.
-    // Sem isso cada lançamento de ponto fazia dezenas de leituras.
-    // Lê o bloco mensal E as chaves diárias antigas do mesmo mês.
-    // Durante a migração os dados podem estar em qualquer um dos dois formatos —
-    // ignorar as diárias apagaria tudo que ainda não foi migrado.
-    let remotos = [];
-    const fontes = CARGA_CONFIAVEL ? [] : [prefix+mes];
+  // Mesclagem ADITIVA: nunca apaga por omissão. Lê o estado remoto (a chave única
+  // E quaisquer chaves antigas do prefixo, durante a migração) e une com a memória.
+  // Quando a carga inicial foi confiável, a memória já reflete o servidor e a
+  // releitura é dispensada.
+  let remotos = [];
+  if(incremental && !CARGA_CONFIAVEL){
     try{
-      if(CARGA_CONFIAVEL) throw new Error('memoria confiavel');
-      const l = await window.storage.list(prefix, true);
-      ((l && l.keys) ? l.keys : []).forEach(k=>{
-        const suf = k.slice(prefix.length);
-        if(CHAVES_VAZIAS.has(k)) return;              // já sabemos que está vazia
-        if(suf === mes) return;                       // já está em fontes
-        if(suf.startsWith(mes+'#')) { fontes.push(k); return; }   // partes numeradas do mês
-        if(suf.length > 7 && suf.slice(0,7) === mes) fontes.push(k);  // chaves diárias antigas
-      });
-    }catch(e){}
-    for(const chave of fontes){
-      try{
-        const r = await window.storage.get(chave, true);
-        if(r && r.value){ const p = JSON.parse(r.value); if(Array.isArray(p)) remotos = remotos.concat(p); }
-      }catch(e){}
-    }
-    const vistosRem = new Set();
-    remotos = remotos.filter(r=>{ const k=idRegistro(r); if(vistosRem.has(k)) return false; vistosRem.add(k); return true; });
-
-    // A gravação é ADITIVA por padrão: une o que está no servidor com o que está
-    // na memória. Nunca apaga por omissão — memória incompleta não destrói dado.
-    // Exclusão só acontece quando o registro é passado explicitamente em 'removidos'.
-    let final;
-    if(dias.length){
-      const excluir = new Set((removidos||[]).map(idRegistro));
-      const vistos = new Set();
-      final = [];
-      [...remotos, ...locais].forEach(r=>{
-        const k = idRegistro(r);
-        if(excluir.has(k) || vistos.has(k)) return;
-        vistos.add(k); final.push(r);
-      });
-    } else {
-      final = locais;   // regravação total (restauração de backup)
-    }
-    // grava em partes, conferindo cada uma; só limpa as sobras se tudo confirmar
-    const partes = fatiarPorTamanho(final);
-    const escritas = [];
-    for(let i=0; i<partes.length; i++){
-      // Toda parte leva sufixo, inclusive a primeira: sem isso a chave
-      // "mo:registros:2026-08" vira prefixo de "mo:registros:2026-08-22"
-      // e as duas se confundem na busca do Apps Script.
-      const chave = prefix + mes + '#' + i;
-      const conteudo = JSON.stringify(partes[i]);
-      if(conteudo.length > 50000){
-        showModal('Bloco grande demais',
-          `O bloco <strong>${chave}</strong> tem ${conteudo.length} caracteres e não cabe numa célula da planilha (limite 50.000). ` +
-          `Nada foi apagado. Baixe um backup pela aba Parâmetros.`, true);
-        return;
+      const resp = await window.storage.getAll(prefix, true);
+      const rows = (resp && resp.rows) ? resp.rows : [];
+      for(const row of rows){
+        if(!row || !row.value) continue;
+        try{ const p = JSON.parse(row.value); if(Array.isArray(p)) remotos = remotos.concat(p); }catch(e){}
       }
-      if(CONTEUDO_GRAVADO[chave] === conteudo){ escritas.push(chave); continue; }
-      const ok = await gravarVerificado(chave, conteudo);
-      if(!ok){
-        showModal('Gravação não confirmada',
-          `O servidor não confirmou a gravação de <strong>${chave}</strong>. ` +
-          `Os dados anteriores foram preservados. Baixe um backup pela aba Parâmetros e tente novamente.`, true);
-        return;
-      }
-      escritas.push(chave);
-    }
-    // Limpa TUDO daquele mês que não foi escrito agora: partes que sobraram de
-    // uma gravação maior, a chave sem sufixo do formato anterior e as diárias.
-    // Antes só as chaves com "#" eram limpas, então a sem sufixo continuava viva
-    // e era lida junto na carga seguinte — os dois conjuntos se somavam.
-    try{
-      const l = await window.storage.list(prefix+mes, true);
-      const sobras = ((l && l.keys) ? l.keys : []).filter(k=>{
-        if(escritas.includes(k)) return false;
-        if(CHAVES_VAZIAS.has(k)) return false;        // já está vazia, não reescreve
-        const suf = k.slice(prefix.length);
-        return suf === mes || suf.startsWith(mes+'#') || suf.slice(0,7) === mes;
-      });
-      await emLotes(sobras, 4, async (k)=>{
-        const r = await window.storage.set(k, '[]', true);
-        if(r && !r.erro) CHAVES_VAZIAS.add(k);
-        return r;
-      });
     }catch(e){}
+    const vr = new Set();
+    remotos = remotos.filter(r=>{ const k=idRegistro(r); if(vr.has(k)) return false; vr.add(k); return true; });
   }
 
-  // remove as chaves diárias antigas dos meses gravados (migração de formato)
+  // Monta o conjunto final.
+  let final;
+  if(incremental){
+    const excluir = new Set((removidos||[]).map(idRegistro));
+    const vistos = new Set();
+    final = [];
+    [...remotos, ...registros].forEach(r=>{
+      const k = idRegistro(r);
+      if(excluir.has(k) || vistos.has(k)) return;
+      vistos.add(k); final.push(r);
+    });
+  } else {
+    final = registros;   // regravação total (ex.: restauração de backup)
+  }
+
+  // Grava tudo de uma vez (sem fatiar).
+  const conteudo = JSON.stringify(final);
+  if(CONTEUDO_GRAVADO[CHAVE] !== conteudo){
+    const ok = await gravarVerificado(CHAVE, conteudo);
+    if(!ok){
+      showModal('Gravação não confirmada',
+        `O servidor não confirmou a gravação de <strong>${CHAVE}</strong>. ` +
+        `Os dados anteriores foram preservados. Baixe um backup pela aba Parâmetros e tente novamente.`, true);
+      return;
+    }
+  }
+  CHAVES_VAZIAS.delete(CHAVE);
+
+  // Consolidado na chave única, apaga as chaves ANTIGAS do mesmo prefixo
+  // (blocos mensais, diários e partes '#'), para não contarem em dobro na carga.
   try{
     const l = await window.storage.list(prefix, true);
-    const antigas = ((l && l.keys) ? l.keys : []).filter(k=>{
-      const suf = k.slice(prefix.length);
-      return suf.length > 7 && suf.indexOf('#') < 0 && meses.includes(suf.slice(0,7));
+    const sobras = ((l && l.keys) ? l.keys : []).filter(k => k !== CHAVE);
+    await emLotes(sobras, 6, async (k)=>{
+      const r = await window.storage.delete(k, true);
+      CHAVES_VAZIAS.add(k);
+      delete CONTEUDO_GRAVADO[k];
+      return r;
     });
-    await emLotes(antigas, 4, k=>window.storage.set(k, '[]', true));
   }catch(e){}
 }
 
