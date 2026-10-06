@@ -7953,24 +7953,31 @@ async function saveCMVAlvos(){
   await salvarChave('cmv:alvos', JSON.stringify(CMV_ALVOS), 'alvos de CMV');
 }
 
-function initCMV(){
-  // preenche sugestões para vínculos ainda não decididos (sem tocar em vínculos já confirmados ou já rejeitados manualmente)
-  FICHA_TECNICA.forEach(p=>{
+/* DESEMPENHO: o laço das sugestões trabalha em fatias e devolve o controle ao
+   navegador entre elas. Num bloco único, a oliveira do carregamento congelava
+   (~0,5 s) logo depois dos 77%. O resultado é exatamente o mesmo de antes. */
+async function initCMV(){
+  const FATIA_MS = 20;
+  let ultimo = performance.now();
+  for(let i=0; i<FICHA_TECNICA.length; i++){
+    const p = FICHA_TECNICA[i];
     const chave = cmvChaveFicha(p);
     const ambiguo = cmvEhAmbiguo(p);
     const existente = CMV_VINCULOS[chave];
     // corrige sugestões automáticas antigas em itens ambíguos (nunca confirmadas por humano) — remove o vínculo arriscado
     if(existente && existente.status==='sugerido' && ambiguo){
       delete CMV_VINCULOS[chave];
-      return;
+    } else if(!existente && !ambiguo){   // já tem decisão, ou nome ambíguo no mesmo PDV: não sugere
+      const sugestao = cmvSugerirProduto(p);
+      if(sugestao){
+        CMV_VINCULOS[chave] = { codigoProduto: sugestao.produto.codigo, precoManual: null, status: 'sugerido' };
+      }
     }
-    if(existente) return; // já tem decisão (confirmado, manual, ou pendente explícito)
-    if(ambiguo) return; // nome bate com mais de uma ficha técnica no mesmo PDV — não arrisca sugestão automática
-    const sugestao = cmvSugerirProduto(p);
-    if(sugestao){
-      CMV_VINCULOS[chave] = { codigoProduto: sugestao.produto.codigo, precoManual: null, status: 'sugerido' };
+    if(performance.now() - ultimo > FATIA_MS){
+      await new Promise(r=>setTimeout(r, 0));
+      ultimo = performance.now();
     }
-  });
+  }
   // popular filtro de PDV
   const selPdv = document.getElementById('cmv-vinculo-filtro-pdv');
   const pdvs = [...new Set(FICHA_TECNICA.map(p=>p.pontoVenda))].sort();
@@ -9473,7 +9480,7 @@ function iniciarSistema(){ return loadAll().then(async ()=>{
     }
   }catch(e){}
   await sirioPasso();
-  try{ initCMV(); }catch(e){ console.error('initCMV:', e); }
+  try{ await initCMV(); }catch(e){ console.error('initCMV:', e); }
   await sirioPasso();
   initAutocompleteCooperado();
   initReqExtra();
