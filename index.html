@@ -5803,6 +5803,53 @@ async function orcComentar(sid){
   await saveSolicitacoes(); renderOrcamento();
 }
 
+/* Acrescentar e remover itens direto no orçamento: a negociação quase sempre
+   muda o cardápio, e antes só dava para mexer na quantidade do que já existia. */
+/* Lista única do orçamento: fichas técnicas e insumos juntos, porque na
+   negociação tanto se acrescenta um prato quanto um insumo avulso. */
+let orcDatalistPronto = false;
+function orcEnsureDatalist(){
+  if(orcDatalistPronto) return;
+  let dl = document.getElementById('orc-itens-datalist');
+  if(!dl){ dl = document.createElement('datalist'); dl.id = 'orc-itens-datalist'; document.body.appendChild(dl); }
+  const vistos = new Set(); const partes = [];
+  FICHA_TECNICA.forEach(p=>{ if(p.nome && !vistos.has(p.nome)){ vistos.add(p.nome);
+    partes.push('<option value="'+String(p.nome).replace(/"/g,'&quot;')+'">produto</option>'); } });
+  INSUMOS.forEach(i=>{ if(i.nome && !vistos.has(i.nome)){ vistos.add(i.nome);
+    partes.push('<option value="'+String(i.nome).replace(/"/g,'&quot;')+'">insumo · '+(i.un||'')+'</option>'); } });
+  dl.innerHTML = partes.join('');
+  orcDatalistPronto = true;
+}
+
+function orcAdicionarItem(sid){
+  const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  const inp = document.getElementById('orc-add-'+sid);
+  const qin = document.getElementById('orc-addq-'+sid);
+  const nome = ((inp||{}).value||'').trim();
+  const qtd = parseFloat((qin||{}).value)||0;
+  if(!nome){ showToast('Escolha o produto ou insumo'); return; }
+  if(qtd<=0){ showToast('Informe a quantidade'); return; }
+  const ehFicha = FICHA_TECNICA.some(p=>p.nome===nome) || !!custoProdutoRealizado(nome);
+  const ins = INSUMOS.find(i=>i.nome===nome);
+  if(!ehFicha && !ins){ showToast('Item não encontrado no cadastro'); return; }
+  s.produtosEvento = s.produtosEvento || [];
+  const ja = s.produtosEvento.find(p=>p.nome===nome);
+  if(ja){ ja.qtd = (parseFloat(ja.qtd)||0) + qtd; }
+  else s.produtosEvento.push({ nome, qtd, custo: ins ? ins.custo : (custoProdutoRealizado(nome)||0),
+                               venda: 0, ehInsumo: !ehFicha });
+  if(inp) inp.value=''; if(qin) qin.value='';
+  renderOrcamento();
+  showToast(ja ? 'Quantidade somada ao item existente' : 'Item acrescentado');
+}
+
+function orcRemoverItem(sid, idx){
+  const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  const p = (s.produtosEvento||[])[idx]; if(!p) return;
+  s.produtosEvento.splice(idx,1);
+  renderOrcamento();
+  showToast('Item removido');
+}
+
 function orcAlterarQtd(sid, tipo, idx, valor){
   const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
   const v = Math.max(0, parseFloat(valor)||0);
@@ -5843,7 +5890,9 @@ function renderOrcamento(){
       const u = custoProdutoRealizado(p.nome) || p.custo || 0;
       return '<tr><td>' + p.nome + (p.ehInsumo?' <span class="badge">insumo</span>':'') + '</td><td style="text-align:right">' + (editavel
         ? '<input type="number" min="0" step="0.5" value="' + (p.qtd||0) + '" style="width:62px;text-align:right;padding:.2rem .3rem;font-size:.82rem;" onchange="orcAlterarQtd(\'' + s.id + '\',\'prod\',' + i + ',this.value)">'
-        : (p.qtd||0)) + '</td><td style="text-align:right">' + fmtBRL(u*(p.qtd||0)) + '</td></tr>';
+        : (p.qtd||0)) + '</td><td style="text-align:right">' + fmtBRL(u*(p.qtd||0)) + '</td>' +
+        (editavel ? '<td style="text-align:center"><a href="#" onclick="orcRemoverItem(\'' + s.id + '\',' + i + ');return false;" style="color:var(--red);font-size:.76rem;">remover</a></td>' : '') +
+        '</tr>';
     }).join('');
     const msgs = (o.mensagens||[]).map(function(m){
       return '<div style="padding:.4rem 0;border-bottom:1px solid #EFF1F5;"><strong style="font-size:.82rem;">' + m.por +
@@ -5866,6 +5915,14 @@ function renderOrcamento(){
       botoes += '<button class="btn sm gold" onclick="orcAceitar(\'' + s.id + '\')" style="margin-left:.4rem;">Aceitar orçamento</button>' +
                 '<button class="btn sm secondary" onclick="orcPedirAjuste(\'' + s.id + '\')" style="margin-left:.4rem;">Pedir ajuste</button>';
     if(ult) botoes += '<button class="btn sm secondary" onclick="orcImprimir(\'' + s.id + '\')" style="margin-left:.4rem;">Imprimir orçamento</button>';
+    if(ult) botoes = '<div class="jul-folha-ctrl" style="margin:.6rem 0;">' +
+      '<label>Enviar este orçamento por e-mail</label><div class="row3">' +
+      '<div><input type="email" id="orc-mail-' + s.id + '" placeholder="e-mail do destinatário" value="' +
+         String((o.emailDestino || s.solicitante || '')).replace(/"/g,'&quot;') + '"></div>' +
+      '<div style="align-self:end;"><button class="btn sm gold" onclick="orcEnviarEmail(\'' + s.id + '\')">Abrir e-mail</button></div>' +
+      '<div style="align-self:end;"><button class="btn sm secondary" onclick="orcCopiarEmail(\'' + s.id + '\')">Copiar texto</button></div>' +
+      '</div><div class="hint" style="text-transform:none;font-weight:normal;">Abre o seu programa de e-mail com a mensagem pronta. ' +
+      'Para enviar o orçamento formatado, use <strong>Imprimir orçamento</strong>, salve em PDF e anexe.</div></div>' + botoes;
     return '<div class="evento-item"><div class="evento-cab" style="cursor:default;">' +
       '<span class="evento-nome">' + (s.nome||'(sem nome)') + '</span>' +
       '<span class="evento-quando">' + (fmtDataBR(s.data)||'sem data') + ' · ' + (s.convidados||0) + ' convidados · ' + (s.departamento||'') + '</span>' +
@@ -5875,12 +5932,87 @@ function renderOrcamento(){
       '<table style="font-size:.82rem;"><tbody>' + (linhasMO||'<tr><td class="subtle">nenhuma</td></tr>') + '</tbody></table></div>' +
       '<div class="pedido-col"><h5>Produtos e insumos <span>' + fmtBRL(t.prod) + '</span></h5>' +
       '<table style="font-size:.82rem;"><tbody>' + (linhasProd||'<tr><td class="subtle">nenhum</td></tr>') + '</tbody></table></div></div>' +
+      (editavel ? ('<div class="jul-folha-ctrl" style="margin:.6rem 0;">' +
+        '<label>Acrescentar produto ou insumo a este orçamento</label>' +
+        '<div class="row3">' +
+        '<div><input type="text" id="orc-add-' + s.id + '" list="orc-itens-datalist" placeholder="Digite parte do nome"></div>' +
+        '<div><input type="number" id="orc-addq-' + s.id + '" min="0" step="0.5" placeholder="Quantidade"></div>' +
+        '<div style="align-self:end;"><button class="btn sm secondary" onclick="orcAdicionarItem(\'' + s.id + '\')">Acrescentar</button></div>' +
+        '</div></div>') : '') +
       '<div class="note" style="font-weight:bold;background:var(--ice-light);">Total do orçamento: ' + fmtBRL(t.total) + difere + '</div>' +
       '<h5 style="margin:.8rem 0 .2rem;font-family:Georgia,serif;color:var(--navy);">Conversa</h5>' +
       '<div style="max-height:170px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:.4rem .6rem;">' + msgs + '</div>' +
       '<textarea id="orc-msg-' + s.id + '" placeholder="Escreva aqui em vez de mandar e-mail" style="min-height:42px;margin-top:.4rem;"></textarea>' +
       botoes + '</div></div>';
   }).join('');
+}
+
+/* Envio por e-mail. A página é estática, então não há como disparar o e-mail
+   sozinha: montamos a mensagem e abrimos o programa de e-mail do usuário, que
+   envia. Corpo enxuto de propósito — vários programas cortam mensagens longas. */
+function orcTextoEmail(s, v){
+  const br = n=>'R$ '+(Number(n)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const L=[];
+  L.push('Orçamento do evento — versão '+v.versao);
+  L.push('');
+  L.push('Evento: '+(s.nome||''));
+  L.push('Data: '+(fmtDataBR(s.data)||'')+'   Local: '+(s.local||'—'));
+  L.push('Convidados: '+(s.convidados||0)+'   Horário: '+(s.horaIni||'—')+' às '+(s.horaFim||'—'));
+  L.push('');
+  if(v.rows.length){
+    L.push('MÃO DE OBRA');
+    v.rows.forEach(r=>L.push('  '+r.qty+'x '+r.f+' — '+br(r.custo)));
+    L.push('  Subtotal: '+br(v.mo));
+    L.push('');
+  }
+  const prods = v.produtos.filter(p=>(p.qtd||0)>0);
+  if(prods.length){
+    L.push('PRODUTOS E INSUMOS');
+    prods.forEach(p=>L.push('  '+p.qtd+'x '+p.nome+' — '+br(p.unit*(p.qtd||0))));
+    L.push('  Subtotal: '+br(v.prod));
+    L.push('');
+  }
+  L.push('TOTAL DO ORÇAMENTO: '+br(v.total));
+  L.push('');
+  L.push('Para aceitar ou pedir ajuste, entre na ferramenta de A&B, aba Orçamento.');
+  L.push('O aceite fica registrado com seu nome, data e hora, e é o que vale quando a conta chegar.');
+  L.push('');
+  L.push('Enviado por '+(v.por||'')+' em '+new Date(v.em).toLocaleString('pt-BR')+'.');
+  return L.join('\n');
+}
+
+function orcEnviarEmail(sid){
+  const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  const hist=(s.orcamento&&s.orcamento.historico)||[]; const v=hist[hist.length-1];
+  if(!v){ showToast('Envie o orçamento antes'); return; }
+  const campo = document.getElementById('orc-mail-'+sid);
+  const dest = ((campo||{}).value || s.solicitante || '').trim();
+  if(!dest || dest.indexOf('@')<0){ showToast('Informe o e-mail do destinatário'); return; }
+  s.orcamento.emailDestino = dest;
+  saveSolicitacoes();
+  const assunto = 'Orçamento — '+(s.nome||'evento')+' — '+(fmtDataBR(s.data)||'')+
+                  ' — versão '+v.versao+' — '+fmtBRL(v.total);
+  const corpo = orcTextoEmail(s, v);
+  const url = 'mailto:'+encodeURIComponent(dest)+
+              '?subject='+encodeURIComponent(assunto)+
+              '&body='+encodeURIComponent(corpo);
+  try{ window.location.href = url; }catch(e){ window.open(url,'_blank'); }
+  showToast('Abrindo seu programa de e-mail para '+dest);
+}
+
+function orcCopiarEmail(sid){
+  const s = SOLICITACOES.find(x=>x.id===sid); if(!s) return;
+  const hist=(s.orcamento&&s.orcamento.historico)||[]; const v=hist[hist.length-1];
+  if(!v){ showToast('Envie o orçamento antes'); return; }
+  const txt = orcTextoEmail(s, v);
+  try{
+    navigator.clipboard.writeText(txt);
+    showToast('Orçamento copiado — cole no e-mail');
+  }catch(e){
+    const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
+    ta.select(); try{ document.execCommand('copy'); showToast('Orçamento copiado'); }catch(e2){ showToast('Não foi possível copiar'); }
+    ta.remove();
+  }
 }
 
 function orcImprimir(sid){
@@ -7709,7 +7841,7 @@ function abrirAba(btn){
     if(btn.dataset.tab==='aprovacoes'){ renderAprovacoes(); renderAprovExtraList(); }
     if(btn.dataset.tab==='execucao') renderExecucao();
     if(btn.dataset.tab==='relatorio') renderRelatorio();
-    if(btn.dataset.tab==='orcamento'){ try{ renderOrcamento(); }catch(e){} }
+    if(btn.dataset.tab==='orcamento'){ try{ orcEnsureDatalist(); renderOrcamento(); }catch(e){} }
     if(btn.dataset.tab==='desperdicio'){ try{ initDesperdicio(); }catch(e){} }
     if(btn.dataset.tab==='maodeobra'){
       try{ popularSelectsPlanejamento(); popularSelectsPonto(); }catch(e){}
