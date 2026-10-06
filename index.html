@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://kemuauvgcayhciwbuodl.supabase.co" crossorigin>
 <title>Workflow de Eventos — A&amp;B</title>
 <style>
   :root{
@@ -2431,6 +2433,9 @@ function mostrarResumoCarga(){
 /* Mostra o que veio do servidor. Sem isso, "não carrega nada" é indistinguível
    de "não existe nada", e não dá para saber se o problema é leitura ou dado. */
 async function diagnosticarCarga(){
+  // O aviso só existe quando nenhum registro carregou. Com registros em memória
+  // não há o que diagnosticar — antes eram 13 consultas em fila a cada abertura.
+  if(MO_REGISTROS.length > 0) return;
   let chaves = [], comDado = 0, vazias = 0;
   try{
     const l = await window.storage.list('mo:registros:', true);
@@ -2839,17 +2844,23 @@ function showModal(title, msg, isError){
 function uid(){ return 'ev_' + Date.now() + '_' + Math.floor(Math.random()*1000); }
 
 async function loadAll(){
-  // Estes blocos eram lidos um após o outro — com ~1,5s por leitura e alguns
-  // deles fatiados em partes, só isso passava de quinze segundos.
-  // Agora todos são buscados ao mesmo tempo.
-  // Leitura em sequência. A versão paralela era mais rápida, mas o Apps Script
-  // limita chamadas simultâneas e a carga passou a travar no meio.
-  const tPar  = await lerGrande('parametros:base').catch(()=>null); window.sirioEtapa&&sirioEtapa();
-  const tCard = await lerGrande('cardapios:catalogo').catch(()=>null); window.sirioEtapa&&sirioEtapa();
-  const tLim  = await lerGrande('mo:limites').catch(()=>null); window.sirioEtapa&&sirioEtapa();
-  const tIns  = await lerGrande('insumos:catalogo').catch(()=>null); window.sirioEtapa&&sirioEtapa();
-  const tSol  = await lerGrande('solicitacoes:log').catch(()=>null); window.sirioEtapa&&sirioEtapa();
-  const tExc  = await lerGrande('mo:excecoes').catch(()=>null); window.sirioEtapa&&sirioEtapa();
+  // Todas as leituras abaixo são independentes entre si, então saem juntas.
+  // Antes eram ~16 viagens ao servidor em fila (uma espera após a outra).
+  // O contador de etapas do loader continua sendo chamado a cada leitura concluída.
+  const _passo = p => p.then(v=>{ window.sirioEtapa&&sirioEtapa(); return v; });
+  const _lg = k => _passo(lerGrande(k).catch(()=>null));
+  const LEGADO = {};
+  const _leg = k => _passo(window.storage.get(k, true).then(v=>{ LEGADO[k] = v; }, ()=>{ LEGADO[k] = null; }));
+  const [tPar, tCard, tLim, tIns, tSol, tExc, rRegs, rAut, rPlan] = await Promise.all([
+    _lg('parametros:base'), _lg('cardapios:catalogo'), _lg('mo:limites'),
+    _lg('insumos:catalogo'), _lg('solicitacoes:log'), _lg('mo:excecoes'),
+    _passo(loadChunkedByMonth('mo:registros:')),
+    _passo(loadChunkedByMonth('mo:autorizacoes_extras:')),
+    _passo(loadChunkedByMonth('mo:planejamento:')),
+    _leg('mo:registros'), _leg('mo:autorizacoes_extras'), _leg('mo:planejamento'),
+    _passo(loadReqExtras()), _passo(loadDesperdicio()),
+    _passo(loadCooperadosExtras()), _passo(carregarIndicadoresSet())
+  ]);
 
   try{ if(tPar) PARAMS = JSON.parse(tPar); }catch(e){}
   // Os parâmetros gravados no servidor são de antes das funções novas. Sem
@@ -2901,13 +2912,13 @@ async function loadAll(){
     if(tExc){ const p = JSON.parse(tExc); if(Array.isArray(p)) EXCECOES = p; }
   }catch(e){}
 
-  MO_REGISTROS = await loadChunkedByMonth('mo:registros:'); window.sirioEtapa&&sirioEtapa();
-  AUTORIZACOES_EXTRAS = await loadChunkedByMonth('mo:autorizacoes_extras:'); window.sirioEtapa&&sirioEtapa();
-  PLANEJAMENTO = await loadChunkedByMonth('mo:planejamento:'); window.sirioEtapa&&sirioEtapa();
+  MO_REGISTROS = rRegs;
+  AUTORIZACOES_EXTRAS = rAut;
+  PLANEJAMENTO = rPlan;
 
   // migracao automatica: dados antigos que ainda estejam na chave unica de antes desta correcao
   try{
-    const antigo = await window.storage.get('mo:registros', true); window.sirioEtapa&&sirioEtapa();
+    const antigo = LEGADO['mo:registros'];
     if(antigo && antigo.value){
       const parte = JSON.parse(antigo.value);
       if(Array.isArray(parte) && parte.length>0){
@@ -2918,7 +2929,7 @@ async function loadAll(){
     }
   }catch(e){}
   try{
-    const antigo = await window.storage.get('mo:autorizacoes_extras', true); window.sirioEtapa&&sirioEtapa();
+    const antigo = LEGADO['mo:autorizacoes_extras'];
     if(antigo && antigo.value){
       const parte = JSON.parse(antigo.value);
       if(Array.isArray(parte) && parte.length>0){
@@ -2929,7 +2940,7 @@ async function loadAll(){
     }
   }catch(e){}
   try{
-    const antigo = await window.storage.get('mo:planejamento', true); window.sirioEtapa&&sirioEtapa();
+    const antigo = LEGADO['mo:planejamento'];
     if(antigo && antigo.value){
       const parte = JSON.parse(antigo.value);
       if(Array.isArray(parte) && parte.length>0){
@@ -2951,10 +2962,6 @@ async function loadAll(){
   calcular();
   renderAprovacoes();
   renderAprovExtraList(); window.sirioEtapa&&sirioEtapa();
-  await loadReqExtras(); window.sirioEtapa&&sirioEtapa();
-  await loadDesperdicio(); window.sirioEtapa&&sirioEtapa();
-  await loadCooperadosExtras(); window.sirioEtapa&&sirioEtapa();
-  await carregarIndicadoresSet(); window.sirioEtapa&&sirioEtapa();
   cargaFim();
   // Remove do planejamento o que na verdade é vaga extra: linha com nome de
   // pessoa e sem quantidade não é planejamento.
@@ -6645,7 +6652,26 @@ document.getElementById('btn-exportar-excedente').addEventListener('click', ()=>
 
 function moChaveDia(data, setor, funcao){ return data+'|||'+setor+'|||'+funcao; }
 
+/* DESEMPENHO: durante um cálculo em lote (Indicadores), o mesmo trio
+   setor/função/turno se repete milhares de vezes. O resultado fica guardado
+   só enquanto o cálculo roda (_BCT_MEMO) — fora disso a busca é sempre direta. */
+let _BCT_MEMO = null;
+function _comMemoCustos(fn){
+  const novo = !_BCT_MEMO;
+  if(novo) _BCT_MEMO = new Map();
+  try{ return fn(); } finally { if(novo) _BCT_MEMO = null; }
+}
 function buscarCustoTurno(setor, funcao, turno){
+  if(_BCT_MEMO){
+    const k = setor + '\u0001' + funcao + '\u0001' + turno;
+    if(_BCT_MEMO.has(k)) return _BCT_MEMO.get(k);
+    const v = _buscarCustoTurnoRaw(setor, funcao, turno);
+    _BCT_MEMO.set(k, v);
+    return v;
+  }
+  return _buscarCustoTurnoRaw(setor, funcao, turno);
+}
+function _buscarCustoTurnoRaw(setor, funcao, turno){
   funcao = normalizarFuncao(funcao);
   // 1) tenta o valor exato por turno (fonte mais precisa)
   let m = CUSTOS_TURNO.find(c => c.setor===setor && c.funcaoTurno === `${funcao} ${turno}`);
@@ -7670,7 +7696,7 @@ let CLIQUE_DO_USUARIO = false;
 document.addEventListener('click', function(e){
   if(e.isTrusted){ CLIQUE_DO_USUARIO = true; setTimeout(function(){ CLIQUE_DO_USUARIO = false; }, 0); }
 }, true);
-const TROCA = { ocupado:false, minimoMs:450 };
+const TROCA = { ocupado:false, minimoMs:180 };   // era 450 ms de espera fixa a cada troca
 function carregamentoInicialAtivo(){
   const L = document.getElementById('sirio-loader');
   return !SISTEMA_INICIADO || (L && L.style.display !== 'none' && !L.classList.contains('saindo'));
@@ -7795,13 +7821,30 @@ function cmvInfo(p){
   const cmvPct = (preco!=null && preco>0) ? (p.subtotal/preco*100) : null;
   return {chave, preco, status, cmvPct};
 }
+/* DESEMPENHO: os trigramas de cada produto são calculados UMA vez e indexados.
+   Antes, cada comparação recriava os dois conjuntos (614 fichas x 815 produtos
+   = ~500 mil comparações, cerca de 2,6 s com a tela travada na abertura). */
+let CMV_TRI_IDX = null, CMV_NORM_IDX = null;
 function cmvIndexarProdutos(){
   if(CMV_PRODUTOS_POR_COD) return;
   CMV_PRODUTOS_POR_COD = {};
   CMV_PRODUTOS_NORM = [];
-  PRODUTOS.forEach(p=>{
+  CMV_TRI_IDX = new Map();
+  CMV_NORM_IDX = new Map();
+  PRODUTOS.forEach((p, i)=>{
     if(p.codigo) CMV_PRODUTOS_POR_COD[p.codigo] = p;
-    CMV_PRODUTOS_NORM.push({produto:p, norm: cmvNormaliza(p.descricao)});
+    const norm = cmvNormaliza(p.descricao);
+    const tri = cmvTrigramas(norm);
+    CMV_PRODUTOS_NORM.push({produto:p, norm, tri});
+    if(!CMV_NORM_IDX.has(norm)) CMV_NORM_IDX.set(norm, []);
+    CMV_NORM_IDX.get(norm).push(i);
+    if(norm){
+      tri.forEach(t=>{
+        let l = CMV_TRI_IDX.get(t);
+        if(!l){ l = []; CMV_TRI_IDX.set(t, l); }
+        l.push(i);
+      });
+    }
   });
 }
 function cmvSugerirProduto(fichaItem){
@@ -7810,12 +7853,23 @@ function cmvSugerirProduto(fichaItem){
     return {produto: CMV_PRODUTOS_POR_COD[fichaItem.codigo], score: 1, motivo:'código'};
   }
   const norm = cmvNormaliza(fichaItem.nome);
+  const ta = cmvTrigramas(norm);
+  // só entram na comparação os produtos que dividem ao menos um trigrama (os demais têm score 0 e nunca vencem)
+  const cand = new Set(CMV_NORM_IDX.get(norm) || []);
+  if(norm) ta.forEach(t=>{ const l = CMV_TRI_IDX.get(t); if(l) for(let k=0;k<l.length;k++) cand.add(l[k]); });
+  const ordem = Array.from(cand).sort((a,b)=>a-b);   // mesma ordem do laço original
   let melhor = null, melhorScore = 0;
-  CMV_PRODUTOS_NORM.forEach(entry=>{
-    if(entry.norm === norm && melhorScore < 0.999){ melhor = entry.produto; melhorScore = 0.999; return; }
-    const score = cmvSimilaridade(norm, entry.norm);
+  for(let k=0;k<ordem.length;k++){
+    const entry = CMV_PRODUTOS_NORM[ordem[k]];
+    if(entry.norm === norm && melhorScore < 0.999){ melhor = entry.produto; melhorScore = 0.999; continue; }
+    let score = 0;
+    if(norm && entry.norm && ta.size && entry.tri.size){
+      let inter = 0;
+      ta.forEach(x=>{ if(entry.tri.has(x)) inter++; });
+      score = (2*inter) / (ta.size + entry.tri.size);
+    }
     if(score > melhorScore){ melhorScore = score; melhor = entry.produto; }
-  });
+  }
   if(melhor && melhorScore >= 0.82) return {produto: melhor, score: melhorScore, motivo: melhorScore>=0.999?'nome idêntico':'nome parecido'};
   return null;
 }
@@ -7824,7 +7878,19 @@ function cmvEhAmbiguo(p){
   const key = p.pontoVenda + '||' + cmvNormaliza(p.nome);
   return (grupos[key]||0) > 1;
 }
+const _cmvNormCache = new Map();
 function cmvNormaliza(s){
+  const k = s || '';
+  if(typeof k !== 'string') return _cmvNormalizaRaw(s);
+  let r = _cmvNormCache.get(k);
+  if(r === undefined){
+    r = _cmvNormalizaRaw(k);
+    if(_cmvNormCache.size > 5000) _cmvNormCache.clear();
+    _cmvNormCache.set(k, r);
+  }
+  return r;
+}
+function _cmvNormalizaRaw(s){
   s = (s||'').toUpperCase();
   s = s.replace(/[ÁÀÂÃ]/g,'A').replace(/[ÉÊ]/g,'E').replace(/[ÍÎ]/g,'I').replace(/[ÓÔÕ]/g,'O').replace(/[ÚÛ]/g,'U').replace(/Ç/g,'C');
   s = s.replace(/\b(INDIVIDUAL|INTEIRA|INTEIRO|TAKE AWAY|PORCAO|PORÇÃO|UNIDADE|UNID|UN|GRANDE|PEQUENO|PEQUENA|MEIA|MEIO|GD|PQ)\b/g,'');
@@ -8547,7 +8613,8 @@ function agoCustoTurno(setor, funcao, turno){
   return _agoCustoMedio;
 }
 
-function agoMOCooperada(){
+function agoMOCooperada(){ return _comMemoCustos(_agoMOCooperadaRaw); }
+function _agoMOCooperadaRaw(){
   _agoCustoMedio = null;
   const real = {}, proj = {};
   const diag = {regsAgosto:0, planAgosto:0, semCusto:0, planSemValor:0, foraPerimetro:0};
@@ -8591,6 +8658,7 @@ function agoMediaPorDiaSemana(real){
 
 function agoMontarQuadro(){
   const mo = agoMOCooperada();
+  AGO_MO_ULTIMO = mo;
   const medias = agoMediaPorDiaSemana(mo.real);
   // Agosto usa a folha do próprio mês (R$ 424.860,69), não mais a de julho.
   const folhaDia = julFolhaIncluir() ? AGO_FOLHA_MES/31 : 0;
@@ -8634,7 +8702,7 @@ function agoRenderKPIs(q){
     kpi('% sobre receita', recTot? (resTot/recTot*100).toFixed(1)+'%' : '—', resTot>=0?'var(--green)':'var(--red)') +
     kpi('Realizado até dia 20', fmtBRL(resReal), resReal>=0?'var(--green)':'var(--red)');
 
-  const dg = (agoMOCooperada()).diag;
+  const dg = (AGO_MO_ULTIMO || agoMOCooperada()).diag;
   const porMedia = proj.filter(l=>l.moOrigem==='média do realizado').length;
   const semPlano = proj.filter(l=>l.moValor===0).length;
   const semPonto = real.filter(l=>l.moOrigem==='sem dado').length;
@@ -8714,9 +8782,12 @@ function agoRenderTabela(q){
 
 function renderAgosto(){
   if(!document.getElementById('ago-tbody')) return;
+  AGO_MO_ULTIMO = null;
   const q = agoMontarQuadro();
-  agoRenderKPIs(q); agoRenderChart(q); agoRenderTabela(q);
+  try{ agoRenderKPIs(q); } finally { AGO_MO_ULTIMO = null; }
+  agoRenderChart(q); agoRenderTabela(q);
 }
+let AGO_MO_ULTIMO = null;
 
 document.getElementById('btn-ago-exportar').addEventListener('click', ()=>{
   const q = agoMontarQuadro();
@@ -9418,6 +9489,12 @@ function iniciarSistema(){ return loadAll().then(async ()=>{
   if(hasRole('admin')) rotinaSemanalBackup().then(()=>renderInicio()).catch(e=>console.error('backup semanal:', e));
 }).catch(e=>{ console.error('Falha na inicialização:', e); if(window.sirioLoaderConcluir) window.sirioLoaderConcluir(); });
 }
+/* DESEMPENHO: dentro destas telas o custo por turno é guardado durante o cálculo */
+['renderIndicadores','renderPlanChart','renderCMV','renderSetembro','renderAgosto','renderJulho','renderMoPainel','renderMoHistorico','gerarFechamento'].forEach(function(n){
+  const f = window[n];
+  if(typeof f !== 'function') return;
+  window[n] = function(){ const a = arguments, t = this; return _comMemoCustos(function(){ return f.apply(t, a); }); };
+});
 </script>
 <script>
 /* ===== CONFIGURAÇÕES: LOGO DO SISTEMA ===== */
