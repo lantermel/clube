@@ -297,6 +297,17 @@
   #auth-gate .lg-btn{width:100%;padding:.8rem;border:0;border-radius:8px;background:var(--navy);color:#fff;font-size:.95rem;font-weight:bold;cursor:pointer;}
   #auth-gate .lg-btn:hover{background:var(--navy-dark);}
 
+  /* ===== CARREGAMENTO NA TROCA DE MENUS ===== */
+  #troca-loader{position:fixed;inset:0;z-index:1800;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8rem;
+    background:rgba(247,247,244,.78);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+    opacity:0;pointer-events:none;transition:opacity .16s ease;}
+  #troca-loader.on{opacity:1;pointer-events:auto;}
+  #troca-loader svg{width:58px;height:58px;animation:tl-gira 1.8s linear infinite;}
+  #troca-loader p{margin:0;font-family:Arial,Helvetica,sans-serif;font-size:.8rem;letter-spacing:.06em;color:#6E6E6E;}
+  @keyframes tl-gira{to{transform:rotate(360deg);}}
+  @media (prefers-reduced-motion:reduce){ #troca-loader svg{animation:none;} #troca-loader{transition-duration:.01s;} }
+  @media print{ #troca-loader{display:none !important;} }
+
   /* ===== FUNCIONÁRIOS E ACESSOS ===== */
   .fx-barra{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.8rem 0 1rem;}
   .fx-barra input{flex:1;min-width:220px;}
@@ -405,6 +416,17 @@
 </style>
 </head>
 <body>
+<!-- Carregamento rápido na troca de menus/telas -->
+<div id="troca-loader" role="status" aria-live="polite" aria-label="Carregando">
+  <svg viewBox="0 0 60 60" aria-hidden="true" focusable="false">
+    <g fill="none" stroke="#C9A227" stroke-width="2.2" stroke-linejoin="round">
+      <rect x="14" y="14" width="32" height="32"/>
+      <rect x="14" y="14" width="32" height="32" transform="rotate(45 30 30)"/>
+    </g>
+    <circle cx="30" cy="30" r="6" fill="#C8161D"/>
+  </svg>
+  <p>Carregando…</p>
+</div>
 <!-- Tela de carregamento (oliveira) — o progresso vem das etapas reais de loadAll() -->
 <div id="sirio-loader" style="display:none" role="progressbar" aria-label="Carregando o sistema" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
   <svg id="oliveira" viewBox="20 110 360 330" aria-hidden="true" focusable="false">
@@ -7642,8 +7664,18 @@ document.getElementById('lg-form').addEventListener('submit', function(ev){
 });
 
 /* ---------- TABS ---------- */
-document.querySelectorAll('.tab-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
+/* Troca de menu/tela: mostra um carregamento curto. Só aparece quando a pessoa clica
+   (inclusive nos botões de grupo do topo); trocas feitas pelo próprio sistema são imediatas. */
+let CLIQUE_DO_USUARIO = false;
+document.addEventListener('click', function(e){
+  if(e.isTrusted){ CLIQUE_DO_USUARIO = true; setTimeout(function(){ CLIQUE_DO_USUARIO = false; }, 0); }
+}, true);
+const TROCA = { ocupado:false, minimoMs:450 };
+function carregamentoInicialAtivo(){
+  const L = document.getElementById('sirio-loader');
+  return !SISTEMA_INICIADO || (L && L.style.display !== 'none' && !L.classList.contains('saindo'));
+}
+function abrirAba(btn){
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
     btn.classList.add('active');
@@ -7661,6 +7693,21 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     if(btn.dataset.tab==='indicadores'){ renderIndicadores(); renderPlanChart(); renderCMV(); renderSetembro(); renderAgosto(); renderJulho(); }
     if(btn.dataset.tab==='cmv'){ renderAbaCMV(); }
     if(btn.dataset.tab==='inicio'){ renderInicio(); }
+}
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const el = document.getElementById('troca-loader');
+    if(!CLIQUE_DO_USUARIO || !el || btn.classList.contains('active') || carregamentoInicialAtivo()){ abrirAba(btn); return; }
+    if(TROCA.ocupado) return;
+    TROCA.ocupado = true;
+    const t0 = performance.now();
+    el.classList.add('on');
+    // dois quadros de espera: a tela de carregamento aparece antes do trabalho pesado da aba
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){
+      try{ abrirAba(btn); }catch(e){ console.error('troca de aba:', e); }
+      const resto = Math.max(0, TROCA.minimoMs - (performance.now() - t0));
+      setTimeout(function(){ el.classList.remove('on'); TROCA.ocupado = false; }, resto);
+    }); });
   });
 });
 abrirGate();
