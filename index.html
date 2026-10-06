@@ -2072,7 +2072,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v149';
+const VERSAO_FERRAMENTA = 'v150';
 const VERSAO_DATA = '06/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -2887,6 +2887,27 @@ async function loadAll(){
   try{
     if(tIns){ const p = JSON.parse(tIns); if(Array.isArray(p) && p.length>0) INSUMOS = p; }
   }catch(e){}
+  /* O catálogo do servidor substitui o do arquivo, então insumo novo embutido
+     numa versão nunca aparecia. Aqui completamos com o que falta e regravamos
+     uma única vez — vale para todos, não só para quem abriu primeiro. */
+  (function completarInsumos(){
+    try{
+      const temNome = new Set(INSUMOS.map(i=>String(i.nome||'').trim().toUpperCase()));
+      const temCod  = new Set(INSUMOS.map(i=>String(i.cod||'').trim()).filter(Boolean));
+      const faltam = DEFAULT_INSUMOS.filter(d=>{
+        const nome = String(d.nome||'').trim().toUpperCase();
+        const cod  = String(d.cod||'').trim();
+        return nome && !temNome.has(nome) && (!cod || !temCod.has(cod));
+      });
+      if(faltam.length){
+        INSUMOS = INSUMOS.concat(JSON.parse(JSON.stringify(faltam)));
+        insumoDatalistBuilt = false;
+        try{ orcDatalistPronto = false; }catch(e){}
+        salvarChave('insumos:catalogo', JSON.stringify(INSUMOS), 'catálogo de insumos');
+        console.log('insumos completados a partir do arquivo:', faltam.length);
+      }
+    }catch(e){ console.error('completarInsumos:', e); }
+  })();
   insumoDatalistBuilt = false;
   try{
     if(tSol){ const p = JSON.parse(tSol); if(Array.isArray(p)) SOLICITACOES = p; }
