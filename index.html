@@ -2072,7 +2072,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v148';
+const VERSAO_FERRAMENTA = 'v149';
+const VERSAO_DATA = '06/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
    Supabase -> Project Settings -> API  (Project URL e anon public key).
@@ -4453,7 +4454,7 @@ initEventoInsumos();
     const i = (typeof INSUMOS!=='undefined'?INSUMOS.length:0);
     const assin = [n,u,f,i,document.querySelectorAll('.card').length,
                    document.querySelectorAll('button').length].join('.');
-    el.innerHTML = `<strong style="color:#E8C766">${VERSAO_FERRAMENTA}</strong> · Assinatura <strong>${assin}</strong> · ${n} abas · ${u} usuários · ` +
+    el.innerHTML = `<strong style="color:#E8C766">${VERSAO_FERRAMENTA}</strong> <span style="color:#9AA4CF">de ${VERSAO_DATA}</span> · Assinatura <strong>${assin}</strong> · ${n} abas · ${u} usuários · ` +
       `${f} fichas · ${i} insumos`;
   }catch(e){}
 })();
@@ -9613,7 +9614,7 @@ function iniciarSistema(){ return loadAll().then(async ()=>{
       // assinaturas diferentes, então não depende de eu atualizar número nenhum.
       const assin = [n,u,f,i,document.querySelectorAll('.card').length,
                      document.querySelectorAll('button').length].join('.');
-      el.innerHTML = `<strong style="color:#E8C766">${VERSAO_FERRAMENTA}</strong> · Assinatura <strong>${assin}</strong> · ${n} abas · ${u} usuários · ` +
+      el.innerHTML = `<strong style="color:#E8C766">${VERSAO_FERRAMENTA}</strong> <span style="color:#9AA4CF">de ${VERSAO_DATA}</span> · Assinatura <strong>${assin}</strong> · ${n} abas · ${u} usuários · ` +
         `${f} fichas · ${i} insumos — compare com a última versão enviada; ` +
         `se não bater, recarregue com Ctrl+F5.`;
     }
