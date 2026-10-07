@@ -2072,7 +2072,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v150';
+const VERSAO_FERRAMENTA = 'v151';
 const VERSAO_DATA = '06/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -2750,7 +2750,7 @@ const USUARIOS = {
   'aurelio.felix@sirio.org.br': { nome: 'Aurélio Felix', roles: ['aprovador1','visao_total'] },
   'liliam.lanterme@sirio.org.br': { nome: 'Liliam Lanterme', roles: ['aprovador2','admin','orcamento','desperdicio'] },
   'amanda.costa@sirio.org.br': { nome: 'Amanda Costa', roles: ['solicitante','execucao','orcamento','desperdicio'] },
-  'ingrid.santos@sirio.org.br': { nome: 'Ingrid Santos', roles: ['solicitante','execucao','insumos','orcamento'] },
+  'ingrid.santos@sirio.org.br': { nome: 'Ingrid Santos', roles: ['solicitante','execucao','insumos','orcamento','precificar'] },
   'raimunda.santana@sirio.org.br': { nome: 'Raimunda Santana', roles: ['execucao'] },
   'everaldo.medeiros@sirio.org.br': { nome: 'Everaldo Medeiros', roles: ['execucao'] },
   'gilberto.dias@sirio.org.br':    { nome: 'Gilberto Dias',    roles: ['execucao'] },
@@ -2761,7 +2761,7 @@ const EMAILS_LIMITES = ['liliam.lanterme@sirio.org.br','aurelio.felix@sirio.org.
 /* Quem enxerga cada aba. 'admin' vê tudo. */
 const TAB_ACESSO = {
   inicio:       ['*'],
-  orcamento:    ['orcamento'],
+  orcamento:    ['orcamento','precificar'],
   solicitar:    ['solicitante'],
   aprovacoes:   ['aprovador1','aprovador2'],
   execucao:     ['execucao'],
@@ -5720,10 +5720,14 @@ function initEscolinha(){
    "não foi isso que pedi". */
 const ORC_STATUS = ['Em orçamento','Aguardando solicitante','Ajuste solicitado'];
 const ehOrcamento = s => ORC_STATUS.includes(s.status);
-const podePrecificar = () => hasRole('aprovador1')||hasRole('aprovador2')||hasRole('admin');
+/* Precificar é função de A&B. Separado da alçada de aprovação para que alguém
+   possa montar e enviar orçamento sem ganhar poder de aprovar eventos. */
+const podePrecificar = () => hasRole('precificar')||hasRole('aprovador1')||hasRole('aprovador2')||hasRole('admin');
+/* Quem precifica não aceita o próprio orçamento: o aceite é do outro lado da
+   mesa, e é dele que vem a força do documento. O administrador é exceção. */
 const souSolicitante = s => hasRole('admin') ||
   ((s.solicitante||s.criadoPor||'') === (currentUserEmail||'')) ||
-  (!s.solicitante && !s.criadoPor && hasRole('orcamento'));
+  (!s.solicitante && !s.criadoPor && hasRole('orcamento') && !podePrecificar());
 
 function orcTotais(s){
   const mo = (s.previsto && s.previsto.rows ? s.previsto.rows : []).reduce((a,r)=>a+(r.custo||0),0);
@@ -9903,7 +9907,8 @@ const PERFIS = [
   ['execucao','Responsável A&B (Execução)','Executa eventos e lança ponto'],
   ['acompanhamento','Acompanhamento','Consulta mão de obra, relatório e indicadores'],
   ['insumos','Cadastro de insumos','Altera o cadastro de insumos'],
-  ['orcamento','Orçamento','Trabalha com o orçamento'],
+  ['orcamento','Orçamento (solicitante)','Vê os próprios orçamentos, aceita ou pede ajuste'],
+  ['precificar','Precificação de orçamentos','Monta a composição, altera itens e envia o orçamento ao solicitante'],
   ['desperdicio','Desperdício','Registra desperdício']
 ];
 function legacyPode(tab, roles, email){
