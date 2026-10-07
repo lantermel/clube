@@ -2079,7 +2079,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v152';
+const VERSAO_FERRAMENTA = 'v154';
 const VERSAO_DATA = '06/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -2849,6 +2849,13 @@ function showModal(title, msg, isError){
   icon.style.color = isError ? '#B23A3A' : '#2E7D5B';
   document.getElementById('confirm-modal').classList.add('show');
 }
+function fecharModal(){
+  const m = document.getElementById('confirm-modal');
+  if(!m) return;
+  m.classList.remove('show');
+  m.style.removeProperty('display');   // limpa estilo direto deixado por versões anteriores
+}
+
 function uid(){ return 'ev_' + Date.now() + '_' + Math.floor(Math.random()*1000); }
 
 async function loadAll(){
@@ -5507,7 +5514,9 @@ async function apagarEventoAprovado(sid){
       await saveSolicitacoes(); await saveReqExtras();
       renderExecucao(); renderRelatorio(); renderAprovacoes(); renderReqExtras(); renderInicio();
       try{ renderSetembro(); }catch(e){}
-      const m=document.getElementById('confirm-modal'); if(m) m.style.display='none';
+      // O modal é exibido por classe; escrever display direto no elemento
+      // tinha prioridade sobre ela e deixava o modal invisível na vez seguinte.
+      fecharModal();
       showToast('Evento apagado');
     });
   }, 60);
@@ -5847,7 +5856,9 @@ async function orcAceitar(sid){
                        comentario: 'Aceitou a versão ' + ult.versao + ' do orçamento, ' + fmtBRL(ult.total) };
       s.status = 'Pendente Aprovador 2';
       await saveSolicitacoes();
-      const m=document.getElementById('confirm-modal'); if(m) m.style.display='none';
+      // O modal é exibido por classe; escrever display direto no elemento
+      // tinha prioridade sobre ela e deixava o modal invisível na vez seguinte.
+      fecharModal();
       renderOrcamento(); renderAprovacoes(); renderInicio();
       showToast('Orçamento aceito — segue para aprovação final');
     });
@@ -6307,7 +6318,9 @@ async function despRemover(id){
     b.addEventListener('click', async function(){
       DESPERDICIO = DESPERDICIO.filter(x=>x.id!==id);
       await saveDesperdicio(); renderDesperdicio();
-      const m=document.getElementById('confirm-modal'); if(m) m.style.display='none';
+      // O modal é exibido por classe; escrever display direto no elemento
+      // tinha prioridade sobre ela e deixava o modal invisível na vez seguinte.
+      fecharModal();
       showToast('Lançamento removido');
     });
   }, 60);
