@@ -1848,6 +1848,13 @@
             <div><label>Preço de cada lanche (R$)</label><input type="number" id="esc-lanche" value="9.40" min="0" step="0.01"></div>
             <div><label>Lanches por dia</label><input type="number" id="esc-qtd-lanches" value="2" min="0" step="1"></div>
           </div>
+          <div class="row2" style="margin-top:.6rem;">
+            <div><label>Receita calculada por</label><select id="esc-base-receita">
+              <option value="uteis">Dias úteis — os pais pagam por dia letivo</option>
+              <option value="evento">Dias com evento lançado no sistema</option></select></div>
+            <div><label>Dias sem atendimento</label><input type="text" id="esc-sem-aula" placeholder="Ex.: 15, 28">
+              <div class="hint" style="text-transform:none;font-weight:normal;">Dias do mês, separados por vírgula, além de fins de semana e feriados nacionais.</div></div>
+          </div>
         </div>
         <div id="esc-kpis" class="jul-kpis"></div>
         <div class="note" id="esc-nota" style="margin-bottom:.8rem;"></div>
@@ -2072,7 +2079,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v151';
+const VERSAO_FERRAMENTA = 'v152';
 const VERSAO_DATA = '06/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -5589,6 +5596,20 @@ function escDepartamentos(){
   return d;
 }
 
+/* Feriados nacionais de 2026. O que é específico do clube entra no campo
+   "dias sem atendimento". */
+const ESC_FERIADOS = ['2026-01-01','2026-02-16','2026-02-17','2026-04-03','2026-04-21','2026-05-01',
+  '2026-06-04','2026-09-07','2026-10-12','2026-11-02','2026-11-15','2026-11-20','2026-12-25'];
+
+function escDiaUtil(iso, foraDoMes){
+  const [a,m,d] = iso.split('-').map(Number);
+  const dow = new Date(a, m-1, d).getDay();
+  if(dow===0 || dow===6) return false;
+  if(ESC_FERIADOS.indexOf(iso) >= 0) return false;
+  if(foraDoMes.indexOf(d) >= 0) return false;
+  return true;
+}
+
 function escMontarQuadro(){
   const dep = (document.getElementById('esc-depto')||{}).value || '';
   const mes = (document.getElementById('esc-mes')||{}).value || '2026-09';
@@ -5597,21 +5618,27 @@ function escMontarQuadro(){
   const pl = parseFloat((document.getElementById('esc-lanche')||{}).value) || 0;
   const ql = parseFloat((document.getElementById('esc-qtd-lanches')||{}).value) || 0;
   const porCrianca = pa + pl*ql;
+  const base = (document.getElementById('esc-base-receita')||{}).value || 'uteis';
+  const foraDoMes = String((document.getElementById('esc-sem-aula')||{}).value || '')
+                      .split(/[,;]/).map(x=>parseInt(x.trim(),10)).filter(x=>x>0 && x<32);
   const dias = new Date(+mes.slice(0,4), +mes.slice(5,7), 0).getDate();
   const q = [];
   for(let d=1; d<=dias; d++){
     const dd = mes + '-' + String(d).padStart(2,'0');
     const evs = SOLICITACOES.filter(s=>String(s.data||'')===dd
-                  && (s.departamento||'').trim()===dep && s.status!=='Cancelado' && s.status!=='Rejeitado');
+                  && (s.departamento||'').trim().toUpperCase()===String(dep).trim().toUpperCase()
+                  && s.status!=='Cancelado' && s.status!=='Rejeitado');
     let mo=0, prod=0, extra=0;
     evs.forEach(s=>{ const c=escCustoEvento(s); mo+=c.mo; prod+=c.prod; extra+=c.extra; });
     const custo = mo+prod+extra;
-    const receita = evs.length ? nc*porCrianca : 0;
-    q.push({dia:d, evs:evs.length, receita, mo, prod, extra, custo,
+    const util = escDiaUtil(dd, foraDoMes);
+    // Os pais pagam por dia letivo, tenha ou não evento lançado no sistema.
+    const receita = base==='uteis' ? (util ? nc*porCrianca : 0) : (evs.length ? nc*porCrianca : 0);
+    q.push({dia:d, evs:evs.length, util, receita, mo, prod, extra, custo,
             porCrianca: nc ? custo/nc : 0, resultado: receita-custo,
             margem: receita>0 ? (receita-custo)/receita : null});
   }
-  return {q, porCrianca, nc, mes, dep};
+  return {q, porCrianca, nc, mes, dep, base};
 }
 
 function renderEscolinha(){
@@ -5619,9 +5646,12 @@ function renderEscolinha(){
   const {q, porCrianca, nc, dep} = escMontarQuadro();
   const S = c => q.reduce((a,l)=>a+(l[c]||0),0);
   const comEv = q.filter(l=>l.evs>0);
+  const diasUteis = q.filter(l=>l.util).length;
+  const diasCusto = q.filter(l=>l.custo>0).length;
   const kpi=(l,v,c)=>`<div class="jul-kpi"><span class="lab">${l}</span><span class="val" ${c?`style="color:${c}"`:''}>${v}</span></div>`;
   const marg = S('receita')>0 ? (S('receita')-S('custo'))/S('receita') : null;
   document.getElementById('esc-kpis').innerHTML =
+    kpi('Dias úteis', diasUteis) +
     kpi('Dias com evento', comEv.length) +
     kpi('Receita', fmtBRL(S('receita')), 'var(--green)') +
     kpi('Custo total', fmtBRL(S('custo')), 'var(--red)') +
@@ -5632,14 +5662,17 @@ function renderEscolinha(){
 
   const el=document.getElementById('esc-nota');
   if(el){
-    const cpc = comEv.length && nc ? S('custo')/comEv.length/nc : 0;
+    const baseDias = diasCusto || comEv.length;
+    const cpc = baseDias && nc ? S('custo')/baseDias/nc : 0;
     el.innerHTML = comEv.length
-      ? `Em <strong>${comEv.length} dia(s)</strong> com evento lançado para <strong>${dep||'—'}</strong>: ` +
-        `cada criança gera <strong>${fmtBRL(porCrianca)}</strong> de receita e custa <strong>${fmtBRL(cpc)}</strong>. ` +
+      ? `Receita de <strong>${fmtBRL(S('receita'))}</strong> em ${diasUteis} dia(s) útil(eis) contra custo de ` +
+        `<strong>${fmtBRL(S('custo'))}</strong> em ${baseDias} dia(s) com lançamento. ` +
+        `Por criança por dia: <strong>${fmtBRL(porCrianca)}</strong> de receita e <strong>${fmtBRL(cpc)}</strong> de custo. ` +
         (cpc>porCrianca
-          ? `<span style="color:var(--red)"><strong>O preço não cobre o custo:</strong> faltam ${fmtBRL(cpc-porCrianca)} por criança por dia, ` +
-            `o que exige reajuste de ${((cpc/porCrianca-1)*100).toFixed(1)}% para empatar.</span>`
-          : `<span style="color:var(--green)">O preço cobre o custo, com folga de ${fmtBRL(porCrianca-cpc)} por criança.</span>`)
+          ? `<span style="color:var(--red)"><strong>O preço não cobre o custo:</strong> faltam ${fmtBRL(cpc-porCrianca)} por criança por dia. ` +
+            `Para empatar, o reajuste necessário é de <strong>${((cpc/porCrianca-1)*100).toFixed(1)}%</strong>, ` +
+            `levando o dia de ${fmtBRL(porCrianca)} para ${fmtBRL(cpc)}.</span>`
+          : `<span style="color:var(--green)">O preço cobre o custo, com folga de ${fmtBRL(porCrianca-cpc)} por criança por dia.</span>`)
       : `Nenhum evento lançado para <strong>${dep||'—'}</strong> nesta competência.`;
   }
 
@@ -5664,8 +5697,16 @@ function renderEscolinha(){
   document.getElementById('esc-chart').innerHTML = svg;
 
   document.getElementById('esc-tbody').innerHTML = q.map(l=>{
-    if(!l.evs) return `<tr><td><strong>${String(l.dia).padStart(2,'0')}</strong></td><td style="text-align:right;color:var(--gray)">—</td>` +
+    if(!l.evs && !l.receita) return `<tr><td><strong>${String(l.dia).padStart(2,'0')}</strong></td><td style="text-align:right;color:var(--gray)">—</td>` +
       '<td style="text-align:right;color:var(--gray)">—</td>'.repeat(8) + '</tr>';
+    if(!l.evs) return `<tr style="background:#FFF8E1;"><td><strong>${String(l.dia).padStart(2,'0')}</strong></td>
+      <td style="text-align:right;color:var(--amber)">sem lançamento</td>
+      <td style="text-align:right">${fmtBRL(l.receita)}</td>
+      <td style="text-align:right;color:var(--gray)">—</td><td style="text-align:right;color:var(--gray)">—</td>
+      <td style="text-align:right;color:var(--gray)">—</td><td style="text-align:right;color:var(--gray)">—</td>
+      <td style="text-align:right;color:var(--gray)">—</td>
+      <td style="text-align:right;color:var(--green);font-weight:bold">${fmtBRL(l.resultado)}</td>
+      <td style="text-align:right;color:var(--gray)">—</td></tr>`;
     return `<tr><td><strong>${String(l.dia).padStart(2,'0')}</strong></td>
       <td style="text-align:right">${l.evs}</td>
       <td style="text-align:right">${fmtBRL(l.receita)}</td>
@@ -5703,7 +5744,7 @@ function initEscolinha(){
   meses.forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=(nomes[m.slice(5,7)]||m)+'/'+m.slice(0,4); msel.appendChild(o); });
   if(am && meses.includes(am)) msel.value=am;
   if(!dsel.dataset.ligado){
-    ['esc-depto','esc-mes','esc-criancas','esc-almoco','esc-lanche','esc-qtd-lanches'].forEach(id=>{
+    ['esc-depto','esc-mes','esc-criancas','esc-almoco','esc-lanche','esc-qtd-lanches','esc-base-receita','esc-sem-aula'].forEach(id=>{
       const e=document.getElementById(id);
       if(e) e.addEventListener(e.tagName==='SELECT'?'change':'input', ()=>{ try{ renderEscolinha(); }catch(err){} });
     });
@@ -5833,18 +5874,62 @@ async function orcComentar(sid){
    muda o cardápio, e antes só dava para mexer na quantidade do que já existia. */
 /* Lista única do orçamento: fichas técnicas e insumos juntos, porque na
    negociação tanto se acrescenta um prato quanto um insumo avulso. */
+/* Busca própria em vez de datalist: o datalist mostra o rótulo em vez do nome
+   em alguns navegadores, e a lista aparecia como "produto" repetido. */
 let orcDatalistPronto = false;
-function orcEnsureDatalist(){
-  if(orcDatalistPronto) return;
-  let dl = document.getElementById('orc-itens-datalist');
-  if(!dl){ dl = document.createElement('datalist'); dl.id = 'orc-itens-datalist'; document.body.appendChild(dl); }
-  const vistos = new Set(); const partes = [];
-  FICHA_TECNICA.forEach(p=>{ if(p.nome && !vistos.has(p.nome)){ vistos.add(p.nome);
-    partes.push('<option value="'+String(p.nome).replace(/"/g,'&quot;')+'">produto</option>'); } });
-  INSUMOS.forEach(i=>{ if(i.nome && !vistos.has(i.nome)){ vistos.add(i.nome);
-    partes.push('<option value="'+String(i.nome).replace(/"/g,'&quot;')+'">insumo · '+(i.un||'')+'</option>'); } });
-  dl.innerHTML = partes.join('');
-  orcDatalistPronto = true;
+function orcEnsureDatalist(){ orcDatalistPronto = true; }
+
+function orcBuscarItem(sid){
+  const inp = document.getElementById('orc-add-'+sid);
+  const box = document.getElementById('orc-ac-'+sid);
+  if(!inp || !box) return;
+  const q = normNome(inp.value);
+  if(q.length < 2){
+    box.innerHTML = '<div class="ac-vazio">Digite ao menos 2 letras do produto ou insumo.</div>';
+    box.classList.add('show'); return;
+  }
+  const palavras = q.split(' ').filter(Boolean);
+  const res = [];
+  FICHA_TECNICA.forEach(p=>{
+    if(!p.nome || res.length>=40) return;
+    if(palavras.every(w=>normNome(p.nome).includes(w))){
+      const c = p.porCrianca || p.subtotal || custoProdutoRealizado(p.nome) || 0;
+      res.push({nome:p.nome, tipo:'produto', custo:c, un:p.unidade||'porção'});
+    }
+  });
+  INSUMOS.forEach(i=>{
+    if(!i.nome || res.length>=60) return;
+    if(palavras.every(w=>normNome(i.nome).includes(w))){
+      res.push({nome:i.nome, tipo:'insumo', custo:i.custo||0, un:i.un||'un'});
+    }
+  });
+  if(!res.length){
+    box.innerHTML = '<div class="ac-vazio">Nada encontrado no cadastro.</div>';
+    box.classList.add('show'); return;
+  }
+  box.innerHTML = res.slice(0,40).map(r=>
+    '<div class="ac-item" data-nome="'+String(r.nome).replace(/"/g,'&quot;')+'">'+r.nome+
+    ' <span class="badge">'+r.tipo+'</span><small>'+fmtBRL(r.custo)+' por '+r.un+'</small></div>').join('');
+  box.classList.add('show');
+  box.querySelectorAll('.ac-item').forEach(el=>{
+    el.addEventListener('mousedown', ev=>{
+      ev.preventDefault();
+      inp.value = el.dataset.nome;
+      box.classList.remove('show');
+      const qin = document.getElementById('orc-addq-'+sid);
+      if(qin) qin.focus();
+    });
+  });
+}
+
+function orcLigarBusca(sid){
+  const inp = document.getElementById('orc-add-'+sid);
+  const box = document.getElementById('orc-ac-'+sid);
+  if(!inp || !box || inp.dataset.ligado) return;
+  inp.addEventListener('input', ()=>orcBuscarItem(sid));
+  inp.addEventListener('focus', ()=>orcBuscarItem(sid));
+  inp.addEventListener('blur', ()=>setTimeout(()=>box.classList.remove('show'), 150));
+  inp.dataset.ligado = '1';
 }
 
 function orcAdicionarItem(sid){
@@ -5961,7 +6046,8 @@ function renderOrcamento(){
       (editavel ? ('<div class="jul-folha-ctrl" style="margin:.6rem 0;">' +
         '<label>Acrescentar produto ou insumo a este orçamento</label>' +
         '<div class="row3">' +
-        '<div><input type="text" id="orc-add-' + s.id + '" list="orc-itens-datalist" placeholder="Digite parte do nome"></div>' +
+        '<div><div class="ac-wrap"><input type="text" id="orc-add-' + s.id + '" autocomplete="off" placeholder="Digite parte do nome">' +
+        '<div class="ac-lista" id="orc-ac-' + s.id + '"></div></div></div>' +
         '<div><input type="number" id="orc-addq-' + s.id + '" min="0" step="0.5" placeholder="Quantidade"></div>' +
         '<div style="align-self:end;"><button class="btn sm secondary" onclick="orcAdicionarItem(\'' + s.id + '\')">Acrescentar</button></div>' +
         '</div></div>') : '') +
@@ -5971,6 +6057,7 @@ function renderOrcamento(){
       '<textarea id="orc-msg-' + s.id + '" placeholder="Escreva aqui em vez de mandar e-mail" style="min-height:42px;margin-top:.4rem;"></textarea>' +
       botoes + '</div></div>';
   }).join('');
+  SOLICITACOES.filter(ehOrcamento).forEach(s=>{ try{ orcLigarBusca(s.id); }catch(e){} });
 }
 
 /* Envio por e-mail. A página é estática, então não há como disparar o e-mail
