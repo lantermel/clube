@@ -373,6 +373,11 @@
   }
   @media (prefers-reduced-motion:reduce){ #sirio-loader{transition-duration:.4s;} }
   @media print{ #sirio-loader{display:none !important;} }
+.ind-nav{display:flex;gap:.4rem;flex-wrap:wrap;margin:0 0 1rem;padding-bottom:.6rem;border-bottom:2px solid var(--border);}
+.ind-nav .ind-sub{background:transparent;border:1px solid var(--border);color:var(--navy);border-radius:999px;
+  padding:.38rem 1rem;font-size:.84rem;cursor:pointer;font-family:inherit;transition:all .15s;}
+.ind-nav .ind-sub:hover{background:var(--ice-light);}
+.ind-nav .ind-sub.ativo{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:bold;}
 </style>
 <style id="layout-2niveis">
 /* ===== LAYOUT DE DOIS NÍVEIS: grupos no topo + submenus na lateral ===== */
@@ -1549,6 +1554,7 @@
             <tfoot id="desp-tfoot"></tfoot>
           </table>
         </div>
+        <div id="desp-pag"></div>
         <button class="btn secondary" id="btn-desp-csv" style="margin-top:1rem;">Exportar para a contabilidade (CSV)</button>
       </div>
     </div>
@@ -1757,7 +1763,8 @@
     </div>
 
     <div class="panel" id="panel-indicadores">
-      <p class="subtle">Custo de mão de obra cooperada por semana. O gráfico compara sempre as <strong>três competências mais recentes</strong>; a tabela abaixo mostra todos os meses desde maio/2026. Maio e Junho vêm da planilha de controle operacional; Julho vem das 5 FAPs semanais (1.265 turnos). Semanas contam sempre 7 dias (1-7, 8-14, 15-21, 22-28, 29-fim), para comparação justa entre meses de tamanhos diferentes. A coluna de variação compara <strong>Agosto contra Julho</strong>, que é o mês fechado mais recente.</p>
+      <div id="ind-nav" class="ind-nav"></div>
+      <p class="subtle" id="card-mo-intro">Custo de mão de obra cooperada por semana. O gráfico compara sempre as <strong>três competências mais recentes</strong>; a tabela abaixo mostra todos os meses desde maio/2026. Maio e Junho vêm da planilha de controle operacional; Julho vem das 5 FAPs semanais (1.265 turnos). Semanas contam sempre 7 dias (1-7, 8-14, 15-21, 22-28, 29-fim), para comparação justa entre meses de tamanhos diferentes. A coluna de variação compara <strong>Agosto contra Julho</strong>, que é o mês fechado mais recente.</p>
       <!-- ===== FECHAMENTO MENSAL ===== -->
       <div class="card" id="card-fechamento-mes">
         <h2>Fechamento mensal — carregar dados do mês</h2>
@@ -1874,6 +1881,25 @@
         <button class="btn secondary" id="btn-esc-csv" style="margin-top:1rem;">Exportar para Excel (CSV)</button>
         <button class="btn gold" id="btn-esc-pdf" style="margin-top:1rem;">Imprimir / salvar PDF</button>
         </div>
+      </div>
+
+      <div class="card" id="card-desperdicio-diario">
+        <h2>Desperdício diário por ponto de venda</h2>
+        <p class="subtle">Lançamentos da aba Desperdício, dia a dia e por ponto de venda. O item descartado já entrou no CMV quando foi requisitado: este quadro mostra quanto desse CMV deve ser reclassificado para perdas em cada ponto.</p>
+        <div class="row2">
+          <div><label>Competência</label><select id="dpd-mes"></select></div>
+        </div>
+        <div id="dpd-kpis" class="jul-kpis" style="margin-top:.8rem;"></div>
+        <h3>Descartado por dia</h3>
+        <div id="dpd-chart"></div>
+        <div style="overflow-x:auto;">
+          <table id="dpd-table">
+            <thead id="dpd-thead"></thead>
+            <tbody id="dpd-tbody"></tbody>
+            <tfoot id="dpd-tfoot"></tfoot>
+          </table>
+        </div>
+        <button class="btn secondary" id="btn-dpd-csv" style="margin-top:1rem;">Exportar para Excel (CSV)</button>
       </div>
 
       <!-- ===== QUADRO: RESULTADO DIÁRIO SETEMBRO/2026 ===== -->
@@ -2021,11 +2047,11 @@
       </div>
 
 
-      <div class="card">
+      <div class="card" id="card-mo-semana">
         <h2>Custo por semana — últimas 3 competências</h2>
         <div id="indicador-chart"></div>
       </div>
-      <div class="card">
+      <div class="card" id="card-mo-comparativo">
         <h2>Tabela comparativa</h2>
         <table>
           <thead><tr><th>Semana</th><th style="text-align:right">Maio (R$)</th><th style="text-align:right">Junho (R$)</th><th style="text-align:right">Julho (R$)</th><th style="text-align:right">Agosto (R$)</th><th style="text-align:right">Agosto vs Julho</th></tr></thead>
@@ -2034,7 +2060,7 @@
         <p class="subtle" style="margin-top:.7rem;">Agosto ainda está em curso — semanas sem lançamento aparecem zeradas e puxam a variação para baixo. A comparação só fica válida para as semanas já fechadas.</p>
       </div>
 
-      <div class="card">
+      <div class="card" id="card-mo-setor">
         <h2>Planejado x Realizado por Setor</h2>
         <p class="subtle">Compara a quantidade e o valor planejados (aba Mão de Obra) com o que foi de fato registrado na folha de ponto, por setor.</p>
         <div class="row2">
@@ -2079,7 +2105,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v154';
+const VERSAO_FERRAMENTA = 'v155';
 const VERSAO_DATA = '06/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -6352,6 +6378,7 @@ function renderDesperdicio(){
     fp.dataset.pronto='1';
   }
   const lista = despFiltrados();
+  const pg = paginar('desp', lista);
   const total = lista.reduce((a,d)=>a+(d.valor||0),0);
   const porPdv = {};
   lista.forEach(d=>{ porPdv[d.pdv] = (porPdv[d.pdv]||0) + (d.valor||0); });
@@ -6362,7 +6389,7 @@ function renderDesperdicio(){
     kpis.innerHTML = kpi('Lançamentos', lista.length) + kpi('Valor descartado', fmtBRL(total), 'var(--red)') +
       Object.entries(porPdv).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([p,v])=>kpi(p, fmtBRL(v))).join('');
   }
-  body.innerHTML = lista.length ? lista.map(d=>
+  body.innerHTML = lista.length ? pg.itens.map(d=>
     '<tr><td>'+fmtDataBR(d.data)+'</td><td>'+d.pdv+'</td><td>'+d.item+'</td>' +
     '<td style="text-align:right">'+d.qtd.toLocaleString('pt-BR')+' '+d.unidade+'</td>' +
     '<td style="text-align:right">'+fmtBRL(d.custoUnit)+' / '+d.unidadeCusto+'</td>' +
@@ -6370,9 +6397,10 @@ function renderDesperdicio(){
     '<td>'+(d.motivo||'')+'</td><td style="font-size:.76rem;color:var(--gray)">'+(d.por||'')+'</td>' +
     '<td style="text-align:center"><a href="#" onclick="despRemover(\''+d.id+'\');return false;" style="color:var(--red);font-size:.8rem;">remover</a></td></tr>'
   ).join('') : '<tr><td colspan="9" class="subtle" style="text-align:center;padding:1rem;">Nenhum lançamento no filtro atual.</td></tr>';
+  renderPaginacao('desp-pag', 'desp', pg, renderDesperdicio);
   const foot = document.getElementById('desp-tfoot');
   if(foot) foot.innerHTML = lista.length
-    ? '<tr style="font-weight:bold;background:var(--ice-light);"><td colspan="5">TOTAL</td>' +
+    ? '<tr style="font-weight:bold;background:var(--ice-light);"><td colspan="5">TOTAL DO FILTRO</td>' +
       '<td style="text-align:right;color:var(--red)">'+fmtBRL(total)+'</td><td colspan="3"></td></tr>' : '';
 }
 
@@ -6395,7 +6423,10 @@ function initDesperdicio(){
   });
   ['desp-filtro-mes','desp-filtro-pdv'].forEach(id=>{
     const e=document.getElementById(id);
-    if(e && !e.dataset.ligado){ e.addEventListener('change', renderDesperdicio); e.dataset.ligado='1'; }
+    if(e && !e.dataset.ligado){
+      e.addEventListener('change', ()=>{ PAGINACAO['desp']=0; renderDesperdicio(); });
+      e.dataset.ligado='1';
+    }
   });
   const b=document.getElementById('btn-desp-lancar');
   if(b && !b.dataset.ligado){ b.addEventListener('click', despLancar); b.dataset.ligado='1'; }
@@ -6414,6 +6445,149 @@ function initDesperdicio(){
   }
   renderDesperdicio();
   despPrevia();
+}
+
+
+/* ============ RESULTADO DIÁRIO DE DESPERDÍCIO ============ */
+function despMontarQuadro(){
+  const mes = (document.getElementById('dpd-mes')||{}).value || '';
+  const lista = DESPERDICIO.filter(d=>!mes || String(d.data||'').slice(0,7)===mes);
+  const dias = mes ? new Date(+mes.slice(0,4), +mes.slice(5,7), 0).getDate() : 31;
+  const pdvs = [...new Set(lista.map(d=>d.pdv).filter(Boolean))].sort();
+  const q = [];
+  for(let d=1; d<=dias; d++){
+    const dd = mes + '-' + String(d).padStart(2,'0');
+    const doDia = lista.filter(x=>String(x.data||'')===dd);
+    const porPdv = {};
+    pdvs.forEach(p=>{ porPdv[p] = doDia.filter(x=>x.pdv===p).reduce((a,x)=>a+(x.valor||0),0); });
+    q.push({dia:d, itens:doDia.length, porPdv,
+            total: doDia.reduce((a,x)=>a+(x.valor||0),0)});
+  }
+  return {q, pdvs, mes, lista};
+}
+
+function renderDespDiario(){
+  const body = document.getElementById('dpd-tbody');
+  if(!body) return;
+  const sel = document.getElementById('dpd-mes');
+  if(sel){
+    const meses = [...new Set(DESPERDICIO.map(d=>String(d.data||'').slice(0,7)).filter(x=>x.length===7))].sort().reverse();
+    const atual = sel.value;
+    sel.innerHTML = meses.map(m=>'<option value="'+m+'">'+m.slice(5)+'/'+m.slice(0,4)+'</option>').join('');
+    if(atual && meses.includes(atual)) sel.value = atual;
+  }
+  const {q, pdvs, lista} = despMontarQuadro();
+  const total = q.reduce((a,l)=>a+l.total,0);
+  const comLanc = q.filter(l=>l.itens>0).length;
+  const kpi=(l,v,c)=>'<div class="jul-kpi"><span class="lab">'+l+'</span><span class="val"'+(c?' style="color:'+c+'"':'')+'>'+v+'</span></div>';
+  const porPdvMes = {};
+  pdvs.forEach(p=>{ porPdvMes[p] = q.reduce((a,l)=>a+(l.porPdv[p]||0),0); });
+  const maior = Object.entries(porPdvMes).sort((a,b)=>b[1]-a[1])[0];
+  const el = document.getElementById('dpd-kpis');
+  if(el) el.innerHTML =
+    kpi('Descartado no mês', fmtBRL(total), 'var(--red)') +
+    kpi('Dias com lançamento', comLanc) +
+    kpi('Lançamentos', lista.length) +
+    kpi('Média por dia lançado', comLanc?fmtBRL(total/comLanc):'—') +
+    (maior ? kpi('Maior ponto de venda', maior[0]+' · '+fmtBRL(maior[1]), 'var(--amber)') : '');
+
+  const cabeca = document.getElementById('dpd-thead');
+  if(cabeca) cabeca.innerHTML = '<tr><th>Dia</th><th style="text-align:right">Itens</th>' +
+    pdvs.map(p=>'<th style="text-align:right">'+p+'</th>').join('') +
+    '<th style="text-align:right">Total do dia</th></tr>';
+
+  const W=760,H=220,padL=58,padB=30,padT=12,padR=10;
+  const mx=Math.max(...q.map(l=>l.total),1);
+  const colW=(W-padL-padR)/q.length, barW=Math.max(4,colW*0.62);
+  const base=H-padB, esc=(H-padT-padB)/mx;
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:'+W+'px;font-family:Arial,Helvetica,sans-serif;">';
+  svg+='<line x1="'+padL+'" y1="'+base+'" x2="'+(W-padR)+'" y2="'+base+'" stroke="#D8E1F5"/>';
+  svg+='<text x="'+(padL-8)+'" y="'+(padT+8)+'" font-size="9" text-anchor="end" fill="#5B6373">'+fmtBRL(mx)+'</text>';
+  q.forEach((l,i)=>{
+    if(!l.total) return;
+    const x=padL+i*colW+(colW-barW)/2, hh=l.total*esc;
+    svg+='<rect x="'+x.toFixed(1)+'" y="'+(base-hh).toFixed(1)+'" width="'+barW.toFixed(1)+'" height="'+Math.max(hh,1).toFixed(1)+
+      '" fill="#B23A3A" rx="1"><title>'+l.dia+' — '+fmtBRL(l.total)+'</title></rect>';
+  });
+  q.forEach((l,i)=>{ if(l.dia%3!==1) return;
+    const x=padL+i*colW+(colW-barW)/2;
+    svg+='<text x="'+(x+barW/2).toFixed(1)+'" y="'+(H-padB+13)+'" font-size="8" text-anchor="middle" fill="#5B6373">'+l.dia+'</text>'; });
+  svg+='</svg>';
+  const ch=document.getElementById('dpd-chart'); if(ch) ch.innerHTML=svg;
+
+  body.innerHTML = q.map(l=>{
+    if(!l.itens) return '<tr><td><strong>'+String(l.dia).padStart(2,'0')+'</strong></td>' +
+      '<td style="text-align:right;color:var(--gray)">—</td>'.repeat(pdvs.length+2) + '</tr>';
+    return '<tr><td><strong>'+String(l.dia).padStart(2,'0')+'</strong></td>' +
+      '<td style="text-align:right">'+l.itens+'</td>' +
+      pdvs.map(p=>'<td style="text-align:right">'+(l.porPdv[p]?fmtBRL(l.porPdv[p]):'<span style="color:var(--gray)">—</span>')+'</td>').join('') +
+      '<td style="text-align:right;font-weight:bold;color:var(--red)">'+fmtBRL(l.total)+'</td></tr>';
+  }).join('');
+
+  const foot=document.getElementById('dpd-tfoot');
+  if(foot) foot.innerHTML = '<tr style="font-weight:bold;background:var(--ice-light);"><td>TOTAL</td>' +
+    '<td style="text-align:right">'+lista.length+'</td>' +
+    pdvs.map(p=>'<td style="text-align:right">'+fmtBRL(porPdvMes[p])+'</td>').join('') +
+    '<td style="text-align:right;color:var(--red)">'+fmtBRL(total)+'</td></tr>';
+}
+
+function initDespDiario(){
+  const sel=document.getElementById('dpd-mes');
+  if(sel && !sel.dataset.ligado){ sel.addEventListener('change', renderDespDiario); sel.dataset.ligado='1'; }
+  const b=document.getElementById('btn-dpd-csv');
+  if(b && !b.dataset.ligado){
+    b.addEventListener('click', ()=>{
+      const {q, pdvs, mes} = despMontarQuadro();
+      if(!q.some(l=>l.itens)){ showToast('Nada para exportar'); return; }
+      exportarCSV('desperdicio_diario_'+(mes||'mes')+'.csv',
+        ['Dia','Itens'].concat(pdvs).concat(['Total do dia']),
+        q.map(l=>[String(l.dia).padStart(2,'0'), l.itens]
+          .concat(pdvs.map(p=>(l.porPdv[p]||0).toFixed(2).replace('.',',')))
+          .concat([l.total.toFixed(2).replace('.',',')])));
+    });
+    b.dataset.ligado='1';
+  }
+  renderDespDiario();
+}
+
+/* ============ SUBNÍVEIS DOS INDICADORES ============
+   A aba reunia nove quadros numa rolagem só. Agora eles ficam agrupados por
+   assunto, e só o grupo escolhido é desenhado. */
+const IND_GRUPOS = [
+  ['fechamento','Fechamento', ['card-fechamento-mes','card-setembro','card-agosto','card-julho','card-julho-folha','card-julho-razao']],
+  ['maodeobra','Mão de obra', ['card-mo-intro','card-mo-semana','card-mo-comparativo','card-mo-setor']],
+  ['cmv','CMV', ['card-cmv']],
+  ['eventos','Eventos', ['card-escolinha','card-desperdicio-diario']],
+];
+
+function indSelecionar(grupo){
+  IND_GRUPOS.forEach(([g,,ids])=>{
+    ids.forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.style.display = (g===grupo) ? '' : 'none';
+    });
+  });
+  document.querySelectorAll('#ind-nav .ind-sub').forEach(b=>{
+    b.classList.toggle('ativo', b.dataset.grupo===grupo);
+  });
+  try{ localStorage.setItem('ind-grupo', grupo); }catch(e){}
+  if(grupo==='eventos'){ try{ initEscolinha(); }catch(e){} try{ initDespDiario(); }catch(e){} }
+  if(grupo==='fechamento'){ try{ renderSetembro(); renderAgosto(); renderJulho(); }catch(e){} }
+}
+
+function initIndicadores(){
+  const nav=document.getElementById('ind-nav');
+  if(!nav) return;
+  if(!nav.dataset.pronto){
+    nav.innerHTML = IND_GRUPOS.map(([g,rotulo])=>
+      '<button class="ind-sub" data-grupo="'+g+'">'+rotulo+'</button>').join('');
+    nav.querySelectorAll('.ind-sub').forEach(b=>
+      b.addEventListener('click', ()=>indSelecionar(b.dataset.grupo)));
+    nav.dataset.pronto='1';
+  }
+  let inicial='fechamento';
+  try{ const s=localStorage.getItem('ind-grupo'); if(s && IND_GRUPOS.some(x=>x[0]===s)) inicial=s; }catch(e){}
+  indSelecionar(inicial);
 }
 
 function renderExecucao(){
@@ -7981,6 +8155,7 @@ function abrirAba(btn){
     if(btn.dataset.tab==='aprovacoes'){ renderAprovacoes(); renderAprovExtraList(); }
     if(btn.dataset.tab==='execucao') renderExecucao();
     if(btn.dataset.tab==='relatorio') renderRelatorio();
+    if(btn.dataset.tab==='indicadores'){ try{ initIndicadores(); }catch(e){} }
     if(btn.dataset.tab==='orcamento'){ try{ orcEnsureDatalist(); renderOrcamento(); }catch(e){} }
     if(btn.dataset.tab==='desperdicio'){ try{ initDesperdicio(); }catch(e){} }
     if(btn.dataset.tab==='maodeobra'){
