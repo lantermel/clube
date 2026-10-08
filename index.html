@@ -1902,6 +1902,51 @@
         <button class="btn secondary" id="btn-dpd-csv" style="margin-top:1rem;">Exportar para Excel (CSV)</button>
       </div>
 
+      <div class="card" id="card-mes-corrente">
+        <h2 class="mes-toggle"><span class="sinal">−</span>Resultado diário — mês corrente <span class="badge green">automático</span></h2>
+        <div class="mes-corpo">
+        <p class="subtle">A competência <strong>aparece sozinha</strong> assim que existe o primeiro registro de ponto, planejamento ou evento no mês, já com a mão de obra calculada. Receita, CMV, folha e despesas gerais são anexados aqui e ficam gravados por competência, para todos os usuários. Julho, agosto e setembro continuam nos quadros próprios, logo abaixo.</p>
+        <div class="row2">
+          <div><label>Competência</label><select id="mes-comp"></select></div>
+          <div style="align-self:end;">
+            <button class="btn secondary" id="btn-mes-csv">Exportar para Excel (CSV)</button>
+            <button class="btn gold" id="btn-mes-pdf" style="margin-left:.4rem;">Imprimir / salvar PDF</button>
+          </div>
+        </div>
+        <div class="jul-folha-ctrl" style="margin:.8rem 0;">
+          <div class="row3">
+            <div><label>Exportação de vendas do PDV</label><input type="file" id="mes-up-receita" accept=".csv,.txt">
+              <div class="hint" style="text-transform:none;font-weight:normal;">Sai sem personal trainer, taxas de academia e sauna, mesa de snooker, buffet e almoço de funcionário e códigos 8000 a 8999.</div></div>
+            <div><label>Requisições do almoxarifado</label><input type="file" id="mes-up-cmv" accept=".csv,.txt">
+              <div class="hint" style="text-transform:none;font-weight:normal;">Rateado nos dias com receita. Mantenha a data no nome, como CMV_01_a_2010.</div></div>
+            <div><label>Razão analítico das despesas gerais</label><input type="file" id="mes-up-gerais" accept=".csv,.txt">
+              <div class="hint" style="text-transform:none;font-weight:normal;">Soma o débito das 15 contas de despesa operacional, incluindo ICMS e COFINS.</div></div>
+          </div>
+          <div class="row2" style="margin-top:.6rem;">
+            <div><label>Folha CLT do mês (R$)</label><input type="number" id="mes-folha" step="0.01" min="0" placeholder="Enquanto não fecha, use a do mês anterior"></div>
+            <div style="align-self:end;"><button class="btn secondary" id="btn-mes-folha">Aplicar folha</button></div>
+          </div>
+          <div class="note" id="mes-up-status" style="margin-top:.6rem;"></div>
+        </div>
+        <div class="note" id="mes-nota" style="margin-bottom:.8rem;"></div>
+        <div id="mes-kpis" class="jul-kpis"></div>
+        <h3>Resultado por dia</h3>
+        <div id="mes-chart"></div>
+        <div style="overflow-x:auto;">
+          <table id="mes-table">
+            <thead><tr><th>Dia</th><th style="text-align:right">Receita</th><th style="text-align:right">CMV</th>
+              <th style="text-align:right">Eventos a cobrar</th><th style="text-align:right">M.O. coop</th>
+              <th style="text-align:right">% da receita</th><th style="text-align:right">Turnos</th>
+              <th style="text-align:right">Folha CLT</th><th style="text-align:right">Gerais</th>
+              <th style="text-align:right">Resultado</th><th>Origem</th></tr></thead>
+            <tbody id="mes-tbody"></tbody>
+            <tfoot id="mes-tfoot"></tfoot>
+          </table>
+        </div>
+        <div class="empty" id="mes-vazio" style="display:none;">Nenhuma competência a partir de outubro/2026 com registro de ponto, planejamento ou evento. O quadro aparece sozinho no primeiro lançamento.</div>
+        </div>
+      </div>
+
       <!-- ===== QUADRO: RESULTADO DIÁRIO SETEMBRO/2026 ===== -->
       <div class="card" id="card-setembro">
         <h2>Resultado diário — Setembro/2026 <span class="badge amber">mês em curso</span></h2>
@@ -2105,7 +2150,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const VERSAO_FERRAMENTA = 'v155';
+const VERSAO_FERRAMENTA = 'v156';
 const VERSAO_DATA = '06/10/2026';
 /* ================= CONEXÃO COM O BACKEND (SUPABASE) =================
    Preencha as DUAS constantes abaixo com os dados do seu projeto:
@@ -2900,7 +2945,7 @@ async function loadAll(){
     _passo(loadChunkedByMonth('mo:planejamento:')),
     _leg('mo:registros'), _leg('mo:autorizacoes_extras'), _leg('mo:planejamento'),
     _passo(loadReqExtras()), _passo(loadDesperdicio()),
-    _passo(loadCooperadosExtras()), _passo(carregarIndicadoresSet())
+    _passo(loadCooperadosExtras()), _passo(carregarIndicadoresSet()), _passo(mesCarregarTodos())
   ]);
 
   try{ if(tPar) PARAMS = JSON.parse(tPar); }catch(e){}
@@ -6554,7 +6599,7 @@ function initDespDiario(){
    A aba reunia nove quadros numa rolagem só. Agora eles ficam agrupados por
    assunto, e só o grupo escolhido é desenhado. */
 const IND_GRUPOS = [
-  ['fechamento','Fechamento', ['card-fechamento-mes','card-setembro','card-agosto','card-julho','card-julho-folha','card-julho-razao']],
+  ['fechamento','Fechamento', ['card-fechamento-mes','card-mes-corrente','card-setembro','card-agosto','card-julho','card-julho-folha','card-julho-razao']],
   ['maodeobra','Mão de obra', ['card-mo-intro','card-mo-semana','card-mo-comparativo','card-mo-setor']],
   ['cmv','CMV', ['card-cmv']],
   ['eventos','Eventos', ['card-escolinha','card-desperdicio-diario']],
@@ -6572,7 +6617,7 @@ function indSelecionar(grupo){
   });
   try{ localStorage.setItem('ind-grupo', grupo); }catch(e){}
   if(grupo==='eventos'){ try{ initEscolinha(); }catch(e){} try{ initDespDiario(); }catch(e){} }
-  if(grupo==='fechamento'){ try{ renderSetembro(); renderAgosto(); renderJulho(); }catch(e){} }
+  if(grupo==='fechamento'){ try{ initMesCorrente(); }catch(e){} try{ renderSetembro(); renderAgosto(); renderJulho(); }catch(e){} }
 }
 
 function initIndicadores(){
@@ -6588,6 +6633,390 @@ function initIndicadores(){
   let inicial='fechamento';
   try{ const s=localStorage.getItem('ind-grupo'); if(s && IND_GRUPOS.some(x=>x[0]===s)) inicial=s; }catch(e){}
   indSelecionar(inicial);
+}
+
+
+/* ============ RESULTADO DIÁRIO — QUALQUER COMPETÊNCIA ============
+   Julho, agosto e setembro foram montados um a um, com dados embutidos no
+   arquivo. Deste quadro em diante a competência nasce sozinha: assim que
+   existe um registro de ponto no mês, ela aparece na lista, com a mão de obra
+   já calculada. Receita, CMV, folha e gerais são anexados pela própria tela e
+   ficam gravados por competência, para todos. */
+
+let MES_DADOS = {};          // 'AAAA-MM' -> {receita, receitaPdv, cmvTotal, cmvAte, folha, gerais, geraisAte, em, por}
+const MES_NOMES = {'01':'Janeiro','02':'Fevereiro','03':'Março','04':'Abril','05':'Maio','06':'Junho',
+  '07':'Julho','08':'Agosto','09':'Setembro','10':'Outubro','11':'Novembro','12':'Dezembro'};
+const MES_PRIMEIRA = '2026-10';   // antes disso os quadros são os montados à mão
+
+function mesRotulo(ym){ return (MES_NOMES[ym.slice(5,7)]||ym.slice(5,7)) + '/' + ym.slice(0,4); }
+function mesDias(ym){ return new Date(+ym.slice(0,4), +ym.slice(5,7), 0).getDate(); }
+
+/* Competências com pelo menos um registro de ponto ou de planejamento. */
+function mesComPonto(){
+  const vistos = new Set();
+  MO_REGISTROS.forEach(r=>{ const d=String(r.data||''); if(d.length>=7 && d.slice(0,7)>=MES_PRIMEIRA) vistos.add(d.slice(0,7)); });
+  PLANEJAMENTO.forEach(p=>{ const d=String(p.data||''); if(d.length>=7 && d.slice(0,7)>=MES_PRIMEIRA) vistos.add(d.slice(0,7)); });
+  SOLICITACOES.forEach(s=>{ const d=String(s.data||''); if(d.length>=7 && d.slice(0,7)>=MES_PRIMEIRA && !ehOrcamento(s)) vistos.add(d.slice(0,7)); });
+  return [...vistos].sort().reverse();
+}
+
+function mesMOCooperada(ym){
+  const real = {}, proj = {};
+  MO_REGISTROS.forEach(r=>{
+    const d = String(r.data||'');
+    if(!d.startsWith(ym) || moForaDoPerimetro(r.setor)) return;
+    const dia = parseInt(d.slice(8,10),10);
+    if(!real[dia]) real[dia] = {valor:0, qtd:0};
+    real[dia].valor += buscarCustoTurno(r.setor, r.funcao, r.turno || '8H');
+    real[dia].qtd++;
+  });
+  PLANEJAMENTO.forEach(p=>{
+    const d = String(p.data||'');
+    if(!d.startsWith(ym) || moForaDoPerimetro(p.setor)) return;
+    const dia = parseInt(d.slice(8,10),10);
+    const qtd = parseInt(p.quantidade,10) || 0;
+    let v = parseFloat(p.valor) || 0;
+    if(v <= 0 && qtd > 0) v = qtd * buscarCustoTurno(p.setor, p.funcao, p.turno || '8H');
+    if(!proj[dia]) proj[dia] = {valor:0, qtd:0};
+    proj[dia].valor += v; proj[dia].qtd += qtd;
+  });
+  return {real, proj};
+}
+
+function mesEventosPorDia(ym){
+  const porDia = {}; let total = 0, n = 0;
+  SOLICITACOES.forEach(s=>{
+    const d = String(s.data||'');
+    if(!d.startsWith(ym)) return;
+    if(s.status === 'Rejeitado' || s.status === 'Cancelado' || ehOrcamento(s)) return;
+    const dia = parseInt(d.slice(8,10),10);
+    if(!dia) return;
+    const mo = (s.previsto && s.previsto.custoMO) || 0;
+    const prod = custoPrevistoProdutos(s);
+    const extras = REQ_EXTRAS.filter(r=>r.eventoId===s.id && r.status!=='Cancelada')
+                             .reduce((a,r)=>a+(r.custoTotal||0),0);
+    const v = mo + prod + extras;
+    if(!porDia[dia]) porDia[dia] = {valor:0, qtd:0};
+    porDia[dia].valor += v; porDia[dia].qtd++;
+    total += v; n++;
+  });
+  return { porDia, total, n };
+}
+
+function mesDadosDe(ym){
+  const d = MES_DADOS[ym] || {};
+  return { receita: d.receita||[], receitaPdv: d.receitaPdv||{}, cmvTotal: d.cmvTotal||0,
+           cmvAte: d.cmvAte||0, folha: d.folha||0, gerais: d.gerais||[], geraisAte: d.geraisAte||0,
+           em: d.em||'', por: d.por||'' };
+}
+
+async function mesSalvar(ym){
+  const ok = await salvarChave('indicadores:'+ym, JSON.stringify(MES_DADOS[ym]||{}), 'indicadores de '+mesRotulo(ym));
+  return ok;
+}
+async function mesCarregar(ym){
+  try{
+    const t = await lerGrande('indicadores:'+ym);
+    if(t){ const d = JSON.parse(t); if(d && typeof d==='object') MES_DADOS[ym] = d; }
+  }catch(e){}
+}
+async function mesCarregarTodos(){
+  for(const ym of mesComPonto()){ await mesCarregar(ym); }
+}
+
+function mesMontarQuadro(ym){
+  const mo = mesMOCooperada(ym);
+  const evs = mesEventosPorDia(ym);
+  const dd = mesDadosDe(ym);
+  const nDias = mesDias(ym);
+  // CMV vem num lançamento único do mês: rateia nos dias com receita
+  const diasRec = dd.receita.filter(x=>x[1]>0).map(x=>x[0]);
+  const cmvDia = diasRec.length ? dd.cmvTotal/diasRec.length : 0;
+  const folhaDia = dd.folha / nDias;
+  return Array.from({length:nDias}, (_,i)=>{
+    const dia = i+1;
+    const r = mo.real[dia], p = mo.proj[dia];
+    let valor = 0, qtd = 0, origem = 'sem dado';
+    if(r && r.valor > 0){ valor = r.valor; qtd = r.qtd; origem = 'ponto'; }
+    else if(p && p.valor > 0){ valor = p.valor; qtd = p.qtd; origem = 'plano'; }
+    const rec = (dd.receita.find(x=>x[0]===dia) || [0,0])[1];
+    const cmv = diasRec.includes(dia) ? cmvDia : 0;
+    const ger = (dd.gerais.find(x=>x[0]===dia) || [0,0])[1];
+    const ev = evs.porDia[dia] || {valor:0, qtd:0};
+    return { dia, receita:rec, evento:ev.valor, evQtd:ev.qtd, cmv,
+             moValor:valor, moQtd:qtd, origem, folha: folhaDia, gerais: ger,
+             resultado: rec + ev.valor - cmv - valor - ger - folhaDia };
+  });
+}
+
+function mesSelecionado(){
+  const sel = document.getElementById('mes-comp');
+  return (sel && sel.value) || (mesComPonto()[0] || '');
+}
+
+function renderMesCorrente(){
+  const body = document.getElementById('mes-tbody');
+  if(!body) return;
+  const lista = mesComPonto();
+  const sel = document.getElementById('mes-comp');
+  if(sel){
+    const atual = sel.value;
+    sel.innerHTML = lista.map(m=>'<option value="'+m+'">'+mesRotulo(m)+'</option>').join('');
+    if(atual && lista.includes(atual)) sel.value = atual;
+  }
+  const card = document.getElementById('card-mes-corrente');
+  const vazio = document.getElementById('mes-vazio');
+  if(!lista.length){
+    if(vazio) vazio.style.display = 'block';
+    body.innerHTML = '';
+    const el=document.getElementById('mes-kpis'); if(el) el.innerHTML='';
+    const ch=document.getElementById('mes-chart'); if(ch) ch.innerHTML='';
+    const ft=document.getElementById('mes-tfoot'); if(ft) ft.innerHTML='';
+    return;
+  }
+  if(vazio) vazio.style.display = 'none';
+  const ym = mesSelecionado();
+  const dd = mesDadosDe(ym);
+  const q = mesMontarQuadro(ym);
+  const S = c => q.reduce((a,l)=>a+(l[c]||0),0);
+  const ultDiaRec = q.reduce((m,l)=>l.receita>0 ? Math.max(m,l.dia) : m, 0);
+  const ultDiaMO  = q.reduce((m,l)=>l.moValor>0 ? Math.max(m,l.dia) : m, 0);
+  const corte = ultDiaRec || ultDiaMO;
+  const T = c => q.filter(l=>l.dia<=corte).reduce((a,l)=>a+(l[c]||0),0);
+
+  const campoFolha = document.getElementById('mes-folha');
+  if(campoFolha && document.activeElement !== campoFolha) campoFolha.value = dd.folha ? dd.folha.toFixed(2) : '';
+
+  const kpi=(l,v,c)=>'<div class="jul-kpi"><span class="lab">'+l+'</span><span class="val"'+(c?' style="color:'+c+'"':'')+'>'+v+'</span></div>';
+  const pctMO = T('receita')>0 ? T('moValor')/T('receita')*100 : null;
+  const el = document.getElementById('mes-kpis');
+  if(el) el.innerHTML =
+    kpi('M.O. cooperada', fmtBRL(T('moValor'))) +
+    kpi('Turnos', T('moQtd')) +
+    kpi('Dias com ponto', q.filter(l=>l.origem==='ponto').length) +
+    kpi('Dias pelo plano', q.filter(l=>l.origem==='plano').length) +
+    kpi('Receita' + (ultDiaRec?' até '+String(ultDiaRec).padStart(2,'0'):''), fmtBRL(T('receita')), 'var(--green)') +
+    kpi('A cobrar de eventos', fmtBRL(T('evento')), 'var(--green)') +
+    kpi('M.O. sobre receita', pctMO===null?'—':pctMO.toFixed(1)+'%', pctMO!==null && pctMO>20?'var(--red)':'var(--green)') +
+    kpi('CMV', fmtBRL(T('cmv')), 'var(--red)') +
+    kpi('Folha CLT do mês', dd.folha?fmtBRL(dd.folha):'—') +
+    kpi('Gerais', fmtBRL(T('gerais')), 'var(--red)') +
+    kpi('Resultado' + (corte?' até '+String(corte).padStart(2,'0'):''), fmtBRL(T('resultado')),
+        T('resultado')>=0?'var(--green)':'var(--red)');
+
+  // o que já foi lançado, e o que falta
+  const falta = [];
+  if(!dd.receita.length) falta.push('receita');
+  if(!dd.cmvTotal) falta.push('CMV');
+  if(!dd.folha) falta.push('folha CLT');
+  if(!dd.gerais.length) falta.push('despesas gerais');
+  const nota = document.getElementById('mes-nota');
+  if(nota){
+    nota.innerHTML = '<strong>Períodos lançados:</strong> ' +
+      'mão de obra até <strong>' + (ultDiaMO?String(ultDiaMO).padStart(2,'0')+'/'+ym.slice(5,7):'—') + '</strong> · ' +
+      'receita até <strong>' + (ultDiaRec?String(ultDiaRec).padStart(2,'0')+'/'+ym.slice(5,7):'—') + '</strong> · ' +
+      'CMV até <strong>' + (dd.cmvAte?String(dd.cmvAte).padStart(2,'0')+'/'+ym.slice(5,7):'—') + '</strong> · ' +
+      'gerais até <strong>' + (dd.geraisAte?String(dd.geraisAte).padStart(2,'0')+'/'+ym.slice(5,7):'—') + '</strong>.' +
+      (falta.length
+        ? ' <span style="color:var(--amber)">Ainda falta anexar: <strong>' + falta.join(', ') + '</strong>. ' +
+          'A mão de obra já entra sozinha pelos registros de ponto; o resto vem dos arquivos.</span>'
+        : ' <span style="color:var(--green)">Todas as fontes lançadas.</span>') +
+      (dd.em ? ' <span style="color:var(--gray)">Atualizado em ' + new Date(dd.em).toLocaleString('pt-BR') + (dd.por?' por '+dd.por:'') + '.</span>' : '');
+    nota.style.background = falta.length ? '#FFF8E1' : 'var(--ice-light)';
+  }
+
+  // gráfico de resultado, no mesmo desenho dos demais meses
+  const W=760,H=250,padL=64,padB=32,padT=14,padR=10;
+  const comDados = q.filter(l=>l.dia<=corte);
+  const maxAbs=Math.max(...comDados.map(l=>Math.abs(l.resultado)),1);
+  const colW=(W-padL-padR)/q.length, barW=Math.max(4,colW*0.62);
+  const zero=padT+(H-padT-padB)/2, esc=((H-padT-padB)/2)/maxAbs;
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:'+W+'px;font-family:Arial,Helvetica,sans-serif;">';
+  svg+='<line x1="'+padL+'" y1="'+zero+'" x2="'+(W-padR)+'" y2="'+zero+'" stroke="#D8E1F5"/>';
+  svg+='<text x="'+(padL-8)+'" y="'+(zero+3)+'" font-size="9" text-anchor="end" fill="#5B6373">0</text>';
+  q.forEach((l,i)=>{
+    if(l.dia>corte) return;
+    const x=padL+i*colW+(colW-barW)/2, hh=Math.abs(l.resultado)*esc;
+    svg+='<rect x="'+x.toFixed(1)+'" y="'+((l.resultado>=0?zero-hh:zero)).toFixed(1)+'" width="'+barW.toFixed(1)+
+         '" height="'+Math.max(hh,1).toFixed(1)+'" fill="'+(l.resultado>=0?'#2E7D5B':'#B23A3A')+'" rx="1">'+
+         '<title>'+l.dia+' — '+fmtBRL(l.resultado)+' ('+l.origem+')</title></rect>';
+  });
+  q.forEach((l,i)=>{ if(l.dia%3!==1) return;
+    const x=padL+i*colW+(colW-barW)/2;
+    svg+='<text x="'+(x+barW/2).toFixed(1)+'" y="'+(H-padB+13)+'" font-size="8" text-anchor="middle" fill="#5B6373">'+l.dia+'</text>'; });
+  if(corte && corte < q.length){
+    const xc=padL+corte*colW;
+    svg+='<line x1="'+xc.toFixed(1)+'" y1="'+padT+'" x2="'+xc.toFixed(1)+'" y2="'+(H-padB)+'" stroke="#C9A227" stroke-width="1.5" stroke-dasharray="4 3"/>';
+    svg+='<text x="'+(xc+4).toFixed(1)+'" y="'+(padT+9)+'" font-size="8.5" fill="#C9A227">sem dados →</text>';
+  }
+  svg+='</svg><div style="display:flex;gap:1.2rem;margin-top:.4rem;font-family:Arial,Helvetica,sans-serif;font-size:.78rem;flex-wrap:wrap;">'+
+    '<span><span style="display:inline-block;width:10px;height:10px;background:#2E7D5B;border-radius:2px;"></span> Positivo</span>'+
+    '<span><span style="display:inline-block;width:10px;height:10px;background:#B23A3A;border-radius:2px;"></span> Negativo</span>'+
+    '<span style="color:#5B6373;">Receita − CMV − M.O. cooperada − folha CLT − gerais.</span></div>';
+  const ch=document.getElementById('mes-chart'); if(ch) ch.innerHTML=svg;
+
+  body.innerHTML = q.map(l=>{
+    const vazioLinha = !l.receita && !l.moValor && !l.gerais && !l.evento;
+    if(vazioLinha) return '<tr><td><strong>'+String(l.dia).padStart(2,'0')+'</strong></td>' +
+      '<td style="text-align:right;color:var(--gray)">—</td>'.repeat(9) + '</tr>';
+    const pct = l.receita>0 ? l.moValor/l.receita*100 : null;
+    return '<tr><td><strong>'+String(l.dia).padStart(2,'0')+'</strong></td>'+
+      '<td style="text-align:right">'+(l.receita?fmtBRL(l.receita):'<span style="color:var(--gray)">—</span>')+'</td>'+
+      '<td style="text-align:right">'+(l.cmv?fmtBRL(l.cmv):'<span style="color:var(--gray)">—</span>')+'</td>'+
+      '<td style="text-align:right">'+(l.evento?fmtBRL(l.evento):'<span style="color:var(--gray)">—</span>')+'</td>'+
+      '<td style="text-align:right">'+(l.moValor?fmtBRL(l.moValor):'<span style="color:var(--gray)">—</span>')+'</td>'+
+      '<td style="text-align:right;color:'+(pct===null?'var(--gray)':(pct>25?'var(--red)':(pct>18?'var(--amber)':'var(--green)')))+'">'+
+        (pct===null?'—':pct.toFixed(1)+'%')+'</td>'+
+      '<td style="text-align:right">'+(l.moQtd||'<span style="color:var(--gray)">—</span>')+'</td>'+
+      '<td style="text-align:right">'+(l.dia<=corte && l.folha?fmtBRL(l.folha):'<span style="color:var(--gray)">—</span>')+'</td>'+
+      '<td style="text-align:right">'+(l.gerais?fmtBRL(l.gerais):'<span style="color:var(--gray)">—</span>')+'</td>'+
+      '<td style="text-align:right;font-weight:bold;color:'+(l.dia>corte?'var(--gray)':(l.resultado>=0?'var(--green)':'var(--red)'))+'">'+
+        (l.dia>corte?'—':fmtBRL(l.resultado))+'</td>'+
+      '<td><span class="badge '+(l.origem==='ponto'?'green':(l.origem==='plano'?'amber':''))+'">'+l.origem+'</span></td></tr>';
+  }).join('');
+
+  const ft=document.getElementById('mes-tfoot');
+  if(ft) ft.innerHTML = '<tr style="font-weight:bold;background:var(--ice-light);">'+
+    '<td>TOTAL'+(corte?' ATÉ '+String(corte).padStart(2,'0'):'')+'</td>'+
+    '<td style="text-align:right">'+fmtBRL(T('receita'))+'</td>'+
+    '<td style="text-align:right">'+fmtBRL(T('cmv'))+'</td>'+
+    '<td style="text-align:right">'+fmtBRL(T('evento'))+'</td>'+
+    '<td style="text-align:right">'+fmtBRL(T('moValor'))+'</td>'+
+    '<td style="text-align:right">'+(pctMO===null?'—':pctMO.toFixed(1)+'%')+'</td>'+
+    '<td style="text-align:right">'+T('moQtd')+'</td>'+
+    '<td style="text-align:right">'+fmtBRL(T('folha'))+'</td>'+
+    '<td style="text-align:right">'+fmtBRL(T('gerais'))+'</td>'+
+    '<td style="text-align:right;color:'+(T('resultado')>=0?'var(--green)':'var(--red)')+'">'+fmtBRL(T('resultado'))+'</td>'+
+    '<td></td></tr>';
+}
+
+/* ---------- anexos por competência ---------- */
+function mesStat(msg, erro){
+  const el = document.getElementById('mes-up-status');
+  if(!el) return;
+  el.innerHTML = msg;
+  el.style.background = erro ? '#FBEEEE' : 'var(--ice-light)';
+}
+
+function mesDiaFinalDoNome(nome){
+  const m = /(\d{1,2})\s*[-_. ]?\s*(\d{2})\s*(?:\d{2})?\s*$/.exec(String(nome).replace(/\.[a-z]+$/i,''));
+  if(m){ const d=parseInt(m[1],10); if(d>=1 && d<=31) return d; }
+  return 0;
+}
+
+async function mesAnexarReceita(arquivo){
+  const ym = mesSelecionado();
+  try{
+    const r = await setImportarReceita(arquivo);
+    const nDias = mesDias(ym);
+    const receita = [];
+    for(let d=1; d<=nDias; d++) receita.push([d, +(r.porDia[d]||0).toFixed(2)]);
+    MES_DADOS[ym] = Object.assign({}, MES_DADOS[ym], {receita, receitaPdv:r.porPdv,
+      em:new Date().toISOString(), por: currentUserName||currentUserEmail||''});
+    const ok = await mesSalvar(ym);
+    renderMesCorrente();
+    const tot = receita.reduce((a,x)=>a+x[1],0);
+    mesStat('<strong style="color:var(--green)">Receita de '+mesRotulo(ym)+' atualizada'+(ok?' e gravada para todos':'')+'.</strong> '+
+      r.linhas.toLocaleString('pt-BR')+' linhas · '+fmtBRL(tot)+' em '+receita.filter(x=>x[1]>0).length+' dia(s).'+
+      (r.excluido ? '<br><span style="color:var(--gray)">'+r.nExc+' lançamento(s) fora de A&B excluídos, '+fmtBRL(r.excluido)+'.</span>' : ''));
+  }catch(e){ mesStat('<strong style="color:var(--red)">Não consegui ler a receita:</strong> '+e.message, true); }
+}
+
+async function mesAnexarCMV(arquivo){
+  const ym = mesSelecionado();
+  try{
+    const r = await setImportarCMV(arquivo);
+    const ate = mesDiaFinalDoNome(arquivo.name) || 0;
+    MES_DADOS[ym] = Object.assign({}, MES_DADOS[ym], {cmvTotal:r.total, cmvAte:ate,
+      em:new Date().toISOString(), por: currentUserName||currentUserEmail||''});
+    const ok = await mesSalvar(ym);
+    renderMesCorrente();
+    mesStat('<strong style="color:var(--green)">CMV de '+mesRotulo(ym)+' atualizado'+(ok?' e gravado para todos':'')+'.</strong> '+
+      r.linhas+' linha(s) · '+fmtBRL(r.total)+', rateado nos dias com receita.' +
+      (ate ? '' : '<br><span style="color:var(--amber)">Não reconheci a data final pelo nome do arquivo. Renomeie para algo como CMV_01_a_2010 para o quadro saber até quando o CMV cobre.</span>'));
+  }catch(e){ mesStat('<strong style="color:var(--red)">Não consegui ler o CMV:</strong> '+e.message, true); }
+}
+
+/* Razão analítico em CSV: soma o débito das contas de despesa operacional. */
+const MES_CONTAS_GERAIS = ['409','392','366','364','360','349','339','338','333','331','327','320','319','269','267'];
+
+async function mesAnexarGerais(arquivo){
+  const ym = mesSelecionado();
+  try{
+    const txt = await setLerTexto(arquivo);
+    const linhas = txt.replace(/\r/g,'\n').split('\n').filter(l=>l.trim());
+    const sep = (linhas[0].split(';').length > linhas[0].split('\t').length) ? ';' : '\t';
+    let conta = null; const porDia = {}; let n = 0; const usadas = new Set();
+    linhas.forEach(l=>{
+      if(l.indexOf('Conta Contábil') === 0){
+        const c = l.split(sep)[1] || '';
+        const m = /^\s*(\d+)\s*-/.exec(c);
+        conta = m ? m[1] : null;
+        return;
+      }
+      if(!conta || MES_CONTAS_GERAIS.indexOf(conta) < 0) return;
+      const c = l.split(sep);
+      if(c.length < 8) return;
+      const data = (c[1]||'').trim();
+      const dia = data.indexOf('/')>0 ? parseInt(data.slice(0,2),10) : 0;
+      if(!dia) return;
+      porDia[dia] = (porDia[dia]||0) + setNum(c[5]) - setNum(c[6]);
+      usadas.add(conta); n++;
+    });
+    if(!n) throw new Error('nenhum lançamento nas contas de despesa operacional');
+    const nDias = mesDias(ym);
+    const gerais = [];
+    for(let d=1; d<=nDias; d++) gerais.push([d, +(porDia[d]||0).toFixed(2)]);
+    const ate = Math.max(...Object.keys(porDia).map(Number));
+    MES_DADOS[ym] = Object.assign({}, MES_DADOS[ym], {gerais, geraisAte:ate,
+      em:new Date().toISOString(), por: currentUserName||currentUserEmail||''});
+    const ok = await mesSalvar(ym);
+    renderMesCorrente();
+    const tot = gerais.reduce((a,x)=>a+x[1],0);
+    mesStat('<strong style="color:var(--green)">Despesas gerais de '+mesRotulo(ym)+' atualizadas'+(ok?' e gravadas para todos':'')+'.</strong> '+
+      n+' lançamento(s) em '+usadas.size+' de '+MES_CONTAS_GERAIS.length+' contas · '+fmtBRL(tot)+' até o dia '+String(ate).padStart(2,'0')+'.');
+  }catch(e){ mesStat('<strong style="color:var(--red)">Não consegui ler o razão:</strong> '+e.message, true); }
+}
+
+async function mesAplicarFolha(){
+  const ym = mesSelecionado();
+  const v = parseFloat(String((document.getElementById('mes-folha')||{}).value).replace(',','.'));
+  if(isNaN(v) || v < 0){ mesStat('<strong style="color:var(--red)">Valor de folha inválido.</strong>', true); return; }
+  MES_DADOS[ym] = Object.assign({}, MES_DADOS[ym], {folha:v,
+    em:new Date().toISOString(), por: currentUserName||currentUserEmail||''});
+  const ok = await mesSalvar(ym);
+  renderMesCorrente();
+  mesStat('<strong style="color:var(--green)">Folha de '+mesRotulo(ym)+' aplicada'+(ok?' e gravada para todos':'')+'.</strong> '+
+    fmtBRL(v)+' no mês, '+fmtBRL(v/mesDias(ym))+' por dia.');
+}
+
+function initMesCorrente(){
+  const liga = (id, ev, fn)=>{
+    const e = document.getElementById(id);
+    if(e && !e.dataset.ligado){ e.addEventListener(ev, fn); e.dataset.ligado='1'; }
+  };
+  liga('mes-comp','change', ()=>{ renderMesCorrente(); mesStat(''); });
+  liga('mes-up-receita','change', function(){ if(this.files[0]) mesAnexarReceita(this.files[0]); this.value=''; });
+  liga('mes-up-cmv','change', function(){ if(this.files[0]) mesAnexarCMV(this.files[0]); this.value=''; });
+  liga('mes-up-gerais','change', function(){ if(this.files[0]) mesAnexarGerais(this.files[0]); this.value=''; });
+  liga('btn-mes-folha','click', mesAplicarFolha);
+  liga('btn-mes-csv','click', ()=>{
+    const ym = mesSelecionado();
+    if(!ym){ showToast('Nenhuma competência'); return; }
+    const q = mesMontarQuadro(ym);
+    exportarCSV('resultado_diario_'+ym+'.csv',
+      ['Dia','Receita','CMV','Eventos a cobrar','M.O. cooperada','% da receita','Turnos','Folha CLT','Gerais','Resultado','Origem'],
+      q.map(l=>[String(l.dia).padStart(2,'0'), l.receita.toFixed(2).replace('.',','), l.cmv.toFixed(2).replace('.',','),
+        l.evento.toFixed(2).replace('.',','), l.moValor.toFixed(2).replace('.',','),
+        l.receita>0?(l.moValor/l.receita*100).toFixed(1).replace('.',',')+'%':'', l.moQtd,
+        l.folha.toFixed(2).replace('.',','), l.gerais.toFixed(2).replace('.',','),
+        l.resultado.toFixed(2).replace('.',','), l.origem]));
+  });
+  liga('btn-mes-pdf','click', ()=>{
+    const ym = mesSelecionado();
+    exportarRelatorioMeses(['card-mes-corrente'], 'Resultado diário — '+mesRotulo(ym), 'resultado_diario_'+ym+'.html');
+  });
+  renderMesCorrente();
 }
 
 function renderExecucao(){
